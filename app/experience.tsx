@@ -1,0 +1,286 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { ArrowRight, Globe2, Heart, MessageCircle, Send, Shield, Sparkles, Users } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { ensureAnonymousUser, supabase } from "@/lib/supabase";
+
+type Stage = "welcome" | "matching" | "question" | "reveal" | "chat";
+type MatchRow = {
+  match_status: "waiting" | "matched";
+  conversation_id: string | null;
+  shared_question: string | null;
+  conversation_expires_at: string | null;
+};
+type ChatMessage = { id: number; sender_id: string; message: string; created_at: string };
+
+export function Experience() {
+  const [stage, setStage] = useState<Stage>("welcome");
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
+  const [userId, setUserId] = useState("");
+  const [partnerId, setPartnerId] = useState("");
+  const [conversationId, setConversationId] = useState("");
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [partnerAnswer, setPartnerAnswer] = useState("");
+  const [answerSubmitted, setAnswerSubmitted] = useState(false);
+  const [submittingAnswer, setSubmittingAnswer] = useState(false);
+  const [expiresAt, setExpiresAt] = useState("");
+  const [seconds, setSeconds] = useState(600);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const startMatching = useCallback(async () => {
+    setError("");
+    try {
+      const user = await ensureAnonymousUser();
+      setUserId(user.id);
+      setConversationId("");
+      setPartnerId("");
+      setQuestion("");
+      setAnswer("");
+      setPartnerAnswer("");
+      setAnswerSubmitted(false);
+      setSubmittingAnswer(false);
+      setMessages([]);
+      setMessage("");
+      setSeconds(600);
+      setStage("matching");
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : "Connection failed.");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (stage !== "matching" || !userId || !supabase) return;
+    const client = supabase;
+    let stopped = false;
+
+    const findMatch = async () => {
+      const { data, error: matchError } = await client.rpc("find_random_match", {
+        p_language: "en",
+      });
+      if (stopped) return;
+      if (matchError) {
+        setError(matchError.message);
+        return;
+      }
+      const match = (data as MatchRow[] | null)?.[0];
+      if (match?.match_status !== "matched" || !match.conversation_id) return;
+
+      const { data: conversation } = await client
+        .from("conversations")
+        .select("user_a,user_b")
+        .eq("id", match.conversation_id)
+        .single();
+      if (stopped) return;
+      setConversationId(match.conversation_id);
+      setQuestion(match.shared_question ?? "What made you smile today?");
+      setExpiresAt(match.conversation_expires_at ?? "");
+      if (conversation) {
+        setPartnerId(conversation.user_a === userId ? conversation.user_b : conversation.user_a);
+      }
+      const { data: existingAnswer } = await client
+        .from("conversation_answers")
+        .select("answer")
+        .eq("conversation_id", match.conversation_id)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (stopped) return;
+      if (existingAnswer?.answer) {
+        setAnswer(existingAnswer.answer);
+        setAnswerSubmitted(true);
+      }
+      setStage("question");
+    };
+
+    void findMatch();
+    const interval = window.setInterval(() => void findMatch(), 2000);
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+    };
+  }, [stage, userId]);
+
+  useEffect(() => {
+    if (!answerSubmitted || !conversationId || stage !== "question" || !supabase) return;
+    const client = supabase;
+    let stopped = false;
+
+    const checkAnswers = async () => {
+      const { data } = await client
+        .from("conversation_answers")
+        .select("user_id,answer")
+        .eq("conversation_id", conversationId);
+      if (stopped || !data || data.length < 2) return;
+      const theirs = data.find((item) => item.user_id !== userId);
+      if (theirs) {
+        setPartnerAnswer(theirs.answer);
+        setStage("reveal");
+      }
+    };
+
+    void checkAnswers();
+    const interval = window.setInterval(() => void checkAnswers(), 1500);
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+    };
+  }, [answerSubmitted, conversationId, stage, userId]);
+
+  useEffect(() => {
+    if (stage !== "chat" || !expiresAt) return;
+    const updateTimer = () => {
+      const remaining = Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 1000));
+      setSeconds(remaining);
+      if (remaining === 0) {
+        setError("Your 10-minute conversation has ended.");
+        setStage("welcome");
+      }
+    };
+    updateTimer();
+    const interval = window.setInterval(updateTimer, 1000);
+    return () => window.clearInterval(interval);
+  }, [expiresAt, stage]);
+
+  useEffect(() => {
+    if (stage !== "chat" || !conversationId || !supabase) return;
+    const client = supabase;
+    void client
+      .from("messages")
+      .select("id,sender_id,message,created_at")
+      .eq("conversation_id", conversationId)
+      .order("created_at")
+      .then(({ data }) => setMessages((data as ChatMessage[] | null) ?? []));
+
+    const channel = client
+      .channel(`conversation-${conversationId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${conversationId}` },
+        (event) => {
+          const incoming = event.new as ChatMessage;
+          setMessages((current) =>
+            current.some((item) => item.id === incoming.id) ? current : [...current, incoming],
+          );
+        },
+      )
+      .subscribe();
+    return () => {
+      void client.removeChannel(channel);
+    };
+  }, [conversationId, stage]);
+
+  const submitAnswer = async () => {
+    if (!supabase || answer.trim().length < 3 || submittingAnswer || answerSubmitted) return;
+    setError("");
+    setSubmittingAnswer(true);
+    setAnswerSubmitted(true);
+    const { error: submitError } = await supabase.rpc("submit_conversation_answer", {
+      p_conversation_id: conversationId,
+      p_answer: answer.trim(),
+    });
+    if (submitError) {
+      setError(submitError.message);
+      setAnswerSubmitted(false);
+    }
+    setSubmittingAnswer(false);
+  };
+
+  const sendMessage = async () => {
+    if (!supabase || !message.trim()) return;
+    const text = message.trim();
+    setMessage("");
+    const { error: sendError } = await supabase.from("messages").insert({
+      conversation_id: conversationId,
+      sender_id: userId,
+      message: text,
+    });
+    if (sendError) setError(sendError.message);
+  };
+
+  const nextHuman = async () => {
+    if (supabase && conversationId) {
+      await supabase.from("conversations").update({ status: "ended" }).eq("id", conversationId);
+    }
+    await startMatching();
+  };
+
+  const blockAndReport = async () => {
+    if (!supabase || !partnerId || !conversationId) return;
+    const reason = window.prompt("Briefly tell us what happened:");
+    if (!reason?.trim()) return;
+    await supabase.from("conversation_reports").insert({
+      conversation_id: conversationId,
+      reporter_id: userId,
+      reported_user_id: partnerId,
+      reason: reason.trim().slice(0, 200),
+    });
+    await supabase.from("user_blocks").insert({ blocker_id: userId, blocked_id: partnerId });
+    await nextHuman();
+  };
+
+  return (
+    <main className="app-shell">
+      <div className="ambient ambient-one" /><div className="ambient ambient-two" />
+      <nav className="topbar">
+        <a className="brand" href="#top"><span className="brand-mark"><Heart size={17} fill="currentColor" /></span><span>one minute human</span></a>
+        <div className="nav-note"><span className="live-dot" /> Realtime connection</div>
+      </nav>
+      <section className="hero" id="top">
+        <div className="copy-panel">
+          <div className="eyebrow"><Sparkles size={14} /> A kinder way to meet someone new</div>
+          <h1>One question.<br /><span>Ten honest minutes.</span></h1>
+          <p className="lead">Meet a stranger through what they think—not what they look like. No followers. No swiping. Just a small, real human moment.</p>
+          <div className="trust-row"><span><Shield size={15} /> 18+ & anonymous</span><span><Globe2 size={15} /> Realtime matching</span></div>
+        </div>
+        <div className="scene" aria-hidden="true">
+          <div className="orbit orbit-a"><span className="satellite sat-a" /></div><div className="orbit orbit-b"><span className="satellite sat-b" /></div><div className="halo" />
+          <div className="human-core"><div className="core-glow" /><MessageCircle size={42} strokeWidth={1.5} /></div>
+          <div className="avatar-orb avatar-one">A</div><div className="avatar-orb avatar-two">M</div><div className="connection-line" />
+          <div className="float-card card-one"><Users size={15} /> Two strangers</div><div className="float-card card-two"><Heart size={15} /> Ten real minutes</div>
+        </div>
+        <div className="experience-card">
+          {stage === "welcome" ? <div className="stage welcome-stage">
+            <span className="mini-label">Ready when you are</span><h2>Meet a human, not a profile.</h2>
+            <p>You will both answer the same question before either answer is revealed.</p>
+            <label className="age-check"><input type="checkbox" checked={ageConfirmed} onChange={(event) => setAgeConfirmed(event.target.checked)} /> I confirm I am 18 or older</label>
+            {error ? <p className="error-note">{error}</p> : null}
+            <Button className="primary-action" disabled={!ageConfirmed} onClick={() => void startMatching()}>Meet someone <ArrowRight size={18} /></Button>
+            <small>Be respectful. Never share passwords, money, phone numbers, or exact location.</small>
+          </div> : null}
+          {stage === "matching" ? <div className="stage center-stage">
+            <div className="match-visual"><span /><span /><i /></div><span className="mini-label">Looking around the world</span>
+            <h2>Finding a thoughtful human…</h2><p>Keep this screen open while another person joins.</p>
+            {error ? <p className="error-note">{error}</p> : null}
+            <Button variant="outline" onClick={() => setStage("welcome")}>Cancel</Button>
+          </div> : null}
+          {stage === "question" ? <div className="stage">
+            <div className="step-line"><span>01</span><i /><b>02</b></div><span className="mini-label">Your shared question</span>
+            <h2 className="question">“{question}”</h2>
+            <textarea value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Write something honest…" maxLength={280} disabled={answerSubmitted} autoFocus />
+            <div className="input-meta"><span>{answerSubmitted ? "Waiting for your stranger…" : "Your stranger sees nothing until both answer"}</span><span>{answer.length}/280</span></div>
+            {error ? <p className="error-note">{error}</p> : null}
+            <Button className="primary-action" disabled={answer.trim().length < 3 || answerSubmitted || submittingAnswer} onClick={() => void submitAnswer()}>{submittingAnswer ? "Submitting…" : answerSubmitted ? "Answer shared" : "Share my answer"} <ArrowRight size={18} /></Button>
+          </div> : null}
+          {stage === "reveal" ? <div className="stage reveal-stage">
+            <span className="mini-label">Both answers are in</span>
+            <div className="answer-bubble mine"><small>You</small>{answer}</div>
+            <div className="answer-bubble theirs"><small>Your stranger</small>{partnerAnswer}</div>
+            <Button className="primary-action" onClick={() => setStage("chat")}>Start your 10 minutes <MessageCircle size={18} /></Button>
+          </div> : null}
+          {stage === "chat" ? <div className="stage chat-stage">
+            <div className="chat-head"><div><span className="live-dot" /> Connected anonymously · Next anytime</div><strong>{String(Math.floor(seconds / 60)).padStart(2, "0")}:{String(seconds % 60).padStart(2, "0")}</strong></div>
+            <div className="chat-window message-list">{messages.length ? messages.map((item) => <div key={item.id} className={`answer-bubble ${item.sender_id === userId ? "mine" : "theirs"}`}>{item.message}</div>) : <p className="empty-chat">Say hello with kindness.</p>}</div>
+            <div className="message-compose"><input value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void sendMessage()} maxLength={500} placeholder="Write a message…" /><Button size="icon" onClick={() => void sendMessage()}><Send size={16} /></Button></div>
+            <div className="chat-actions"><Button variant="outline" onClick={() => void nextHuman()}>Next human</Button><Button className="primary-action" onClick={() => void sendMessage()}>Send kindness</Button></div>
+            <button className="report-link" type="button" onClick={() => void blockAndReport()}>Block and report this conversation</button>
+          </div> : null}
+        </div>
+      </section>
+      <footer><Shield size={14} /> No photos · No exact location · No public profiles <span>Designed for kinder internet moments.</span></footer>
+    </main>
+  );
+}
