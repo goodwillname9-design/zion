@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Globe2, Heart, MessageCircle, Send, Shield, Sparkles, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ type MatchRow = {
   shared_question: string | null;
   conversation_expires_at: string | null;
 };
-type ChatMessage = { id: number; sender_id: string; message: string; created_at: string };
+type ChatMessage = { id: number; sender_id: string; message: string; created_at: string; read_at: string | null };
 
 export function Experience() {
   const [stage, setStage] = useState<Stage>("welcome");
@@ -32,6 +32,7 @@ export function Experience() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const messageListRef = useRef<HTMLDivElement>(null);
 
   const startMatching = useCallback(async () => {
     setError("");
@@ -149,12 +150,22 @@ export function Experience() {
   useEffect(() => {
     if (stage !== "chat" || !conversationId || !supabase) return;
     const client = supabase;
-    void client
-      .from("messages")
-      .select("id,sender_id,message,created_at")
-      .eq("conversation_id", conversationId)
-      .order("created_at")
-      .then(({ data }) => setMessages((data as ChatMessage[] | null) ?? []));
+    let stopped = false;
+
+    const refreshMessages = async () => {
+      await client.rpc("mark_conversation_messages_read", {
+        p_conversation_id: conversationId,
+      });
+      const { data } = await client
+        .from("messages")
+        .select("id,sender_id,message,created_at,read_at")
+        .eq("conversation_id", conversationId)
+        .order("created_at");
+      if (!stopped) setMessages((data as ChatMessage[] | null) ?? []);
+    };
+
+    void refreshMessages();
+    const refreshInterval = window.setInterval(() => void refreshMessages(), 1200);
 
     const channel = client
       .channel(`conversation-${conversationId}`)
@@ -166,13 +177,28 @@ export function Experience() {
           setMessages((current) =>
             current.some((item) => item.id === incoming.id) ? current : [...current, incoming],
           );
+          if (incoming.sender_id !== userId) {
+            void client.rpc("mark_conversation_messages_read", {
+              p_conversation_id: conversationId,
+            });
+          }
         },
       )
       .subscribe();
     return () => {
+      stopped = true;
+      window.clearInterval(refreshInterval);
       void client.removeChannel(channel);
     };
-  }, [conversationId, stage]);
+  }, [conversationId, stage, userId]);
+
+  useEffect(() => {
+    if (stage !== "chat" || !messageListRef.current) return;
+    messageListRef.current.scrollTo({
+      top: messageListRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages, stage]);
 
   const submitAnswer = async () => {
     if (!supabase || answer.trim().length < 3 || submittingAnswer || answerSubmitted) return;
@@ -285,7 +311,7 @@ export function Experience() {
           </div> : null}
           {stage === "chat" ? <div className="stage chat-stage">
             <div className="chat-head"><div><span className="live-dot" /> Connected anonymously · Next anytime</div><strong>{String(Math.floor(seconds / 60)).padStart(2, "0")}:{String(seconds % 60).padStart(2, "0")}</strong></div>
-            <div className="chat-window message-list">{messages.length ? messages.map((item) => <div key={item.id} className={`answer-bubble ${item.sender_id === userId ? "mine" : "theirs"}`}>{item.message}</div>) : <p className="empty-chat">Say hello with kindness.</p>}</div>
+            <div className="chat-window message-list" ref={messageListRef}>{messages.length ? messages.map((item) => <div key={item.id} className={`answer-bubble ${item.sender_id === userId ? "mine" : "theirs"}`}><span className="message-text">{item.message}</span>{item.sender_id === userId ? <span className={`message-receipt ${item.read_at ? "read" : "sent"}`} aria-label={item.read_at ? "Read" : "Sent"}>{item.read_at ? "✓✓" : "✓"}</span> : null}</div>) : <p className="empty-chat">Say hello with kindness.</p>}</div>
             <div className="message-compose"><input value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void sendMessage()} maxLength={500} placeholder="Write a message…" /><Button size="icon" onClick={() => void sendMessage()}><Send size={16} /></Button></div>
             <div className="chat-actions"><Button variant="outline" onClick={() => void nextHuman()}>Next human</Button><Button className="primary-action" onClick={() => void sendMessage()}>Send kindness</Button></div>
             <button className="report-link" type="button" onClick={() => void blockAndReport()}>Block and report this conversation</button>
