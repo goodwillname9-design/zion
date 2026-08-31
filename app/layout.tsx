@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "One Minute Human",
+  title: "ZION",
   description: "Meet a stranger through one thoughtful question and ten honest minutes.",
   icons: {
     icon: "/favicon.svg",

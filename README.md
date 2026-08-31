@@ -1,4 +1,4 @@
-# One Minute Human
+# ZION
 
 A premium 3D animated stranger-conversation concept. Each match gets a ten-minute chat, and either person can choose **Next human** at any time.
 

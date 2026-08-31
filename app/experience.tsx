@@ -17,6 +17,7 @@ type ChatMessage = { id: number; sender_id: string; message: string; created_at:
 
 export function Experience() {
   const [stage, setStage] = useState<Stage>("welcome");
+  const [showZionIntro, setShowZionIntro] = useState(false);
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [userId, setUserId] = useState("");
   const [partnerId, setPartnerId] = useState("");
@@ -226,9 +227,20 @@ export function Experience() {
     <main className="app-shell">
       <div className="ambient ambient-one" /><div className="ambient ambient-two" />
       <nav className="topbar">
-        <a className="brand" href="#top"><span className="brand-mark"><Heart size={17} fill="currentColor" /></span><span>one minute human</span></a>
+        <button className="brand" type="button" onClick={() => setShowZionIntro(true)} aria-label="Open ZION welcome animation"><span className="brand-mark"><Heart size={17} fill="currentColor" /></span><span>ZION</span></button>
         <div className="nav-note"><span className="live-dot" /> Realtime connection</div>
       </nav>
+      {showZionIntro ? <div className="zion-overlay" role="dialog" aria-modal="true" aria-label="Welcome to ZION">
+        <button className="zion-close" type="button" onClick={() => setShowZionIntro(false)} aria-label="Close animation">×</button>
+        <div className="zion-stars"><i /><i /><i /><i /><i /></div>
+        <div className="zion-title"><span>WELCOME TO</span><strong>ZION</strong><small>Two strangers. One real hello.</small></div>
+        <div className="zion-people" aria-hidden="true">
+          <div className="zion-person zion-boy"><div className="hi-bubble">Hi!</div><div className="person-head"><i className="hair" /><i className="eye eye-one" /><i className="eye eye-two" /><i className="smile" /></div><div className="person-body" /><div className="wave-arm" /></div>
+          <div className="hello-line"><i /><Heart size={25} fill="currentColor" /><i /></div>
+          <div className="zion-person zion-girl"><div className="hi-bubble">Hello!</div><div className="person-head"><i className="hair" /><i className="eye eye-one" /><i className="eye eye-two" /><i className="smile" /></div><div className="person-body" /><div className="wave-arm" /></div>
+        </div>
+        <button className="zion-enter" type="button" onClick={() => setShowZionIntro(false)}>Start meeting kindly <ArrowRight size={17} /></button>
+      </div> : null}
       <section className="hero" id="top">
         <div className="copy-panel">
           <div className="eyebrow"><Sparkles size={14} /> A kinder way to meet someone new</div>
