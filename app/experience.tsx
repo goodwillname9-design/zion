@@ -14,8 +14,9 @@ type MatchRow = {
   conversation_expires_at: string | null;
 };
 type ChatMessage = { id: number; sender_id: string; message: string; created_at: string; read_at: string | null };
+export type ZionProfile = { id: string; username: string; gender: string; country: string; avatar: string; is_banned: boolean; ban_reason: string | null };
 
-export function Experience() {
+export function Experience({ profile, onOpenFriends }: { profile?: ZionProfile; onOpenFriends?: () => void }) {
   const [stage, setStage] = useState<Stage>("welcome");
   const [showZionIntro, setShowZionIntro] = useState(false);
   const [ageConfirmed, setAgeConfirmed] = useState(false);
@@ -32,6 +33,7 @@ export function Experience() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [friendNotice, setFriendNotice] = useState("");
   const messageListRef = useRef<HTMLDivElement>(null);
 
   const startMatching = useCallback(async () => {
@@ -249,12 +251,21 @@ export function Experience() {
     await nextHuman();
   };
 
+  const addCurrentFriend = async () => {
+    if (!supabase || !partnerId) return;
+    setFriendNotice("");
+    const { data, error: friendError } = await supabase.rpc("request_zion_friend", {
+      p_user_id: partnerId,
+    });
+    setFriendNotice(friendError ? friendError.message : data === "accepted" ? "You are now friends." : "Friend request sent.");
+  };
+
   return (
     <main className="app-shell">
       <div className="ambient ambient-one" /><div className="ambient ambient-two" />
       <nav className="topbar">
         <button className="brand" type="button" onClick={() => setShowZionIntro(true)} aria-label="Open ZION welcome animation"><span className="brand-mark"><Heart size={17} fill="currentColor" /></span><span>ZION</span></button>
-        <div className="nav-note"><span className="live-dot" /> Realtime connection</div>
+        <div className="topbar-actions"><button className="profile-chip" type="button" onClick={onOpenFriends}><span>{profile?.avatar ?? "🙂"}</span><b>{profile?.username ?? "Friends"}</b></button><div className="nav-note"><span className="live-dot" /> Realtime connection</div></div>
       </nav>
       {showZionIntro ? <div className="zion-overlay" role="dialog" aria-modal="true" aria-label="Welcome to ZION">
         <button className="zion-close" type="button" onClick={() => setShowZionIntro(false)} aria-label="Close animation">×</button>
@@ -313,7 +324,8 @@ export function Experience() {
             <div className="chat-head"><div><span className="live-dot" /> Connected anonymously · Next anytime</div><strong>{String(Math.floor(seconds / 60)).padStart(2, "0")}:{String(seconds % 60).padStart(2, "0")}</strong></div>
             <div className="chat-window message-list" ref={messageListRef}>{messages.length ? messages.map((item) => <div key={item.id} className={`answer-bubble ${item.sender_id === userId ? "mine" : "theirs"}`}><span className="message-text">{item.message}</span>{item.sender_id === userId ? <span className={`message-receipt ${item.read_at ? "read" : "sent"}`} aria-label={item.read_at ? "Read" : "Sent"}>{item.read_at ? "✓✓" : "✓"}</span> : null}</div>) : <p className="empty-chat">Say hello with kindness.</p>}</div>
             <div className="message-compose"><input value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void sendMessage()} maxLength={500} placeholder="Write a message…" /><Button size="icon" onClick={() => void sendMessage()}><Send size={16} /></Button></div>
-            <div className="chat-actions"><Button variant="outline" onClick={() => void nextHuman()}>Next human</Button><Button className="primary-action" onClick={() => void sendMessage()}>Send kindness</Button></div>
+            {friendNotice ? <div className="friend-notice">{friendNotice}</div> : null}
+            <div className="chat-actions"><Button variant="outline" onClick={() => void nextHuman()}>Next human</Button><Button variant="outline" onClick={() => void addCurrentFriend()}>Add friend</Button><Button className="primary-action" onClick={() => void sendMessage()}>Send kindness</Button></div>
             <button className="report-link" type="button" onClick={() => void blockAndReport()}>Block and report this conversation</button>
           </div> : null}
         </div>

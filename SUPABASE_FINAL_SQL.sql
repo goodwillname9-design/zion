@@ -236,3 +236,145 @@ $$;
 
 revoke all on function public.find_random_match(text) from public;
 grant execute on function public.find_random_match(text) to authenticated;
+
+-- ZION profiles, permanent friends, pinned friends and private friend chat.
+create table if not exists public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  username text not null unique check (char_length(username) between 3 and 24),
+  gender text not null check (gender in ('male', 'female', 'other')),
+  country text not null check (char_length(country) between 2 and 60),
+  avatar text not null default 'avatar-1',
+  is_banned boolean not null default false,
+  ban_reason text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.profiles enable row level security;
+drop policy if exists "Authenticated users view profiles" on public.profiles;
+create policy "Authenticated users view profiles" on public.profiles
+for select to authenticated using (true);
+drop policy if exists "Users create own profile" on public.profiles;
+create policy "Users create own profile" on public.profiles
+for insert to authenticated with check (id = auth.uid());
+drop policy if exists "Users update own profile" on public.profiles;
+create policy "Users update own profile" on public.profiles
+for update to authenticated using (id = auth.uid()) with check (id = auth.uid());
+
+create table if not exists public.friendships (
+  id uuid primary key default gen_random_uuid(),
+  requester_id uuid not null references auth.users(id) on delete cascade,
+  addressee_id uuid not null references auth.users(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'declined')),
+  created_at timestamptz not null default now(),
+  accepted_at timestamptz,
+  check (requester_id <> addressee_id),
+  unique (requester_id, addressee_id)
+);
+
+alter table public.friendships enable row level security;
+drop policy if exists "Members view friendships" on public.friendships;
+create policy "Members view friendships" on public.friendships
+for select to authenticated using (requester_id = auth.uid() or addressee_id = auth.uid());
+drop policy if exists "Users request friendship" on public.friendships;
+create policy "Users request friendship" on public.friendships
+for insert to authenticated with check (requester_id = auth.uid());
+drop policy if exists "Addressee updates friendship" on public.friendships;
+create policy "Addressee updates friendship" on public.friendships
+for update to authenticated using (addressee_id = auth.uid()) with check (addressee_id = auth.uid());
+
+create table if not exists public.friend_pins (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  friend_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, friend_id)
+);
+alter table public.friend_pins enable row level security;
+drop policy if exists "Users manage own pins" on public.friend_pins;
+create policy "Users manage own pins" on public.friend_pins
+for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+create or replace function public.is_friendship_member(p_friendship_id uuid, p_user_id uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.friendships f
+    where f.id = p_friendship_id and f.status = 'accepted'
+      and (f.requester_id = p_user_id or f.addressee_id = p_user_id)
+  );
+$$;
+revoke all on function public.is_friendship_member(uuid, uuid) from public;
+grant execute on function public.is_friendship_member(uuid, uuid) to authenticated;
+
+create or replace function public.request_zion_friend(p_user_id uuid)
+returns text language plpgsql security definer set search_path = '' as $$
+declare current_user_id uuid := auth.uid();
+begin
+  if current_user_id is null or p_user_id = current_user_id then raise exception 'Invalid friend request'; end if;
+  if exists (select 1 from public.profiles p where p.id = current_user_id and p.is_banned) then raise exception 'Account is banned'; end if;
+  if exists (select 1 from public.user_blocks b where (b.blocker_id=current_user_id and b.blocked_id=p_user_id) or (b.blocker_id=p_user_id and b.blocked_id=current_user_id)) then raise exception 'Friend request unavailable'; end if;
+  update public.friendships set status='accepted', accepted_at=now()
+  where requester_id=p_user_id and addressee_id=current_user_id and status='pending';
+  if found then return 'accepted'; end if;
+  insert into public.friendships(requester_id, addressee_id)
+  values(current_user_id, p_user_id)
+  on conflict(requester_id, addressee_id) do update set status=case when public.friendships.status='declined' then 'pending' else public.friendships.status end;
+  return 'requested';
+end; $$;
+revoke all on function public.request_zion_friend(uuid) from public;
+grant execute on function public.request_zion_friend(uuid) to authenticated;
+
+create table if not exists public.friend_messages (
+  id bigint generated by default as identity primary key,
+  friendship_id uuid not null references public.friendships(id) on delete cascade,
+  sender_id uuid not null references auth.users(id) on delete cascade,
+  message text,
+  media_path text,
+  media_type text check (media_type is null or media_type in ('image','video')),
+  created_at timestamptz not null default now(),
+  read_at timestamptz,
+  check ((message is not null and char_length(message) between 1 and 1000) or media_path is not null)
+);
+alter table public.friend_messages enable row level security;
+drop policy if exists "Friends read messages" on public.friend_messages;
+create policy "Friends read messages" on public.friend_messages
+for select to authenticated using (public.is_friendship_member(friendship_id, auth.uid()));
+drop policy if exists "Friends send messages" on public.friend_messages;
+create policy "Friends send messages" on public.friend_messages
+for insert to authenticated with check (sender_id=auth.uid() and public.is_friendship_member(friendship_id, auth.uid()));
+
+create or replace function public.mark_friend_messages_read(p_friendship_id uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+declare current_user_id uuid := auth.uid();
+begin
+  if not public.is_friendship_member(p_friendship_id, current_user_id) then raise exception 'Not friends'; end if;
+  update public.friend_messages set read_at=coalesce(read_at,now())
+  where friendship_id=p_friendship_id and sender_id<>current_user_id and read_at is null;
+end; $$;
+revoke all on function public.mark_friend_messages_read(uuid) from public;
+grant execute on function public.mark_friend_messages_read(uuid) to authenticated;
+
+alter table public.messages add column if not exists media_path text;
+alter table public.messages add column if not exists media_type text
+check (media_type is null or media_type in ('image','video'));
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('chat-media','chat-media',false,15728640,array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','video/quicktime'])
+on conflict (id) do update set public=false, file_size_limit=15728640,
+allowed_mime_types=excluded.allowed_mime_types;
+
+drop policy if exists "Authenticated upload chat media" on storage.objects;
+create policy "Authenticated upload chat media" on storage.objects
+for insert to authenticated with check (
+  bucket_id='chat-media' and (storage.foldername(name))[3]=auth.uid()::text
+  and (
+    ((storage.foldername(name))[1]='random' and public.is_conversation_participant(((storage.foldername(name))[2])::uuid,auth.uid()))
+    or ((storage.foldername(name))[1]='friend' and public.is_friendship_member(((storage.foldername(name))[2])::uuid,auth.uid()))
+  )
+);
+drop policy if exists "Participants view chat media" on storage.objects;
+create policy "Participants view chat media" on storage.objects
+for select to authenticated using (
+  bucket_id='chat-media' and (
+    ((storage.foldername(name))[1]='random' and public.is_conversation_participant(((storage.foldername(name))[2])::uuid,auth.uid()))
+    or ((storage.foldername(name))[1]='friend' and public.is_friendship_member(((storage.foldername(name))[2])::uuid,auth.uid()))
+  )
+);

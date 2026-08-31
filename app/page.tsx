@@ -1,5 +1,5 @@
-import { Experience } from "./experience";
+import { SocialShell } from "./social-shell";
 
 export default function Home() {
-  return <Experience />;
+  return <SocialShell />;
 }
