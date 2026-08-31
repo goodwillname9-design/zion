@@ -265,7 +265,7 @@ export function Experience({ profile, onOpenFriends }: { profile?: ZionProfile; 
       <div className="ambient ambient-one" /><div className="ambient ambient-two" />
       <nav className="topbar">
         <button className="brand" type="button" onClick={() => setShowZionIntro(true)} aria-label="Open ZION welcome animation"><span className="brand-mark"><Heart size={17} fill="currentColor" /></span><span>ZION</span></button>
-        <div className="topbar-actions"><button className="profile-chip" type="button" onClick={onOpenFriends}><span>{profile?.avatar ?? "🙂"}</span><b>{profile?.username ?? "Friends"}</b></button><div className="nav-note"><span className="live-dot" /> Realtime connection</div></div>
+        <div className="topbar-actions"><button className="friends-nav" type="button" onClick={onOpenFriends}><Users size={16} /><b>Friends</b></button><button className="profile-chip" type="button" onClick={onOpenFriends} aria-label="Open profile and friends"><span>{profile?.avatar ?? "🙂"}</span><b>{profile?.username ?? "Profile"}</b></button><div className="nav-note"><span className="live-dot" /> Realtime connection</div></div>
       </nav>
       {showZionIntro ? <div className="zion-overlay" role="dialog" aria-modal="true" aria-label="Welcome to ZION">
         <button className="zion-close" type="button" onClick={() => setShowZionIntro(false)} aria-label="Close animation">×</button>
