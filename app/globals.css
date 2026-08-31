@@ -296,6 +296,22 @@ footer span { margin-left: auto; }
   .scene { position: relative; grid-row: 2; width: 360px; height: 330px; right: auto; top: auto; margin: -15px auto -50px; transform: scale(.78); transform-origin: center; }
   .experience-card { grid-column: 1; width: min(100%, 580px); margin: auto; }
 }
+@media (min-width: 541px) {
+  .app-shell:has(.chat-stage) { min-height: 100dvh; overflow: hidden; }
+  .app-shell:has(.chat-stage) .copy-panel,
+  .app-shell:has(.chat-stage) .scene,
+  .app-shell:has(.chat-stage) footer { display: none; }
+  .app-shell:has(.chat-stage) .hero { grid-template-columns: 1fr; width: min(1100px, calc(100% - 40px)); min-height: calc(100dvh - 84px); height: calc(100dvh - 84px); padding: 12px 0 24px; align-items: stretch; }
+  .app-shell:has(.chat-stage) .experience-card { grid-column: 1; width: 100%; max-width: 1100px; height: 100%; min-height: 0; margin: 0 auto; border-radius: 30px; }
+  .app-shell:has(.chat-stage) .chat-stage { height: 100%; min-height: 0; padding: 28px 34px 24px; justify-content: flex-start; }
+  .app-shell:has(.chat-stage) .chat-head { flex: 0 0 auto; }
+  .app-shell:has(.chat-stage) .chat-window.message-list { flex: 1 1 auto; min-height: 260px; max-height: none; padding: 16px 8px 12px 0; }
+  .app-shell:has(.chat-stage) .message-list .answer-bubble { max-width: 70%; padding: 15px 18px 22px; font-size: 16px; }
+  .app-shell:has(.chat-stage) .message-compose { flex: 0 0 auto; min-height: 54px; }
+  .app-shell:has(.chat-stage) .message-compose input { font-size: 16px; }
+  .app-shell:has(.chat-stage) .chat-actions { flex: 0 0 auto; grid-template-columns: 220px 1fr; }
+  .app-shell:has(.chat-stage) .report-link { flex: 0 0 auto; margin-top: 10px; }
+}
 @media (max-width: 540px) {
   .topbar { height: 70px; }.nav-note { font-size: 0; padding: 10px; }
   .hero { width: min(100% - 24px, 1180px); padding-bottom: 55px; }
