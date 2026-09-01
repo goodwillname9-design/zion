@@ -14,7 +14,7 @@ type MatchRow = {
   conversation_expires_at: string | null;
 };
 type ChatMessage = { id: number; sender_id: string; message: string; created_at: string; read_at: string | null };
-export type ZionProfile = { id: string; username: string; gender: string; country: string; avatar: string; is_banned: boolean; ban_reason: string | null };
+export type ZionProfile = { id: string; username: string; gender: string; country: string; avatar: string; avatar_url?: string | null; created_at?: string; is_banned: boolean; ban_reason: string | null; allow_audio_calls?: boolean; show_country?: boolean; show_online_status?: boolean };
 
 export function Experience({ profile, onOpenFriends }: { profile?: ZionProfile; onOpenFriends?: () => void }) {
   const [stage, setStage] = useState<Stage>("welcome");
@@ -265,7 +265,7 @@ export function Experience({ profile, onOpenFriends }: { profile?: ZionProfile; 
       <div className="ambient ambient-one" /><div className="ambient ambient-two" />
       <nav className="topbar">
         <button className="brand" type="button" onClick={() => setShowZionIntro(true)} aria-label="Open ZION welcome animation"><span className="brand-mark"><Heart size={17} fill="currentColor" /></span><span>ZION</span></button>
-        <div className="topbar-actions"><button className="friends-nav" type="button" onClick={onOpenFriends}><Users size={16} /><b>Friends</b></button><button className="profile-chip" type="button" onClick={onOpenFriends} aria-label="Open profile and friends"><span>{profile?.avatar ?? "🙂"}</span><b>{profile?.username ?? "Profile"}</b></button><div className="nav-note"><span className="live-dot" /> Realtime connection</div></div>
+        <div className="topbar-actions"><button className="friends-nav" type="button" onClick={onOpenFriends}><Users size={16} /><b>Friends</b></button><button className="profile-chip" type="button" onClick={onOpenFriends} aria-label="Open profile and friends"><span>{profile?.avatar_url?<img src={profile.avatar_url} alt="Profile"/>:profile?.avatar ?? "🙂"}</span><b>{profile?.username ?? "Profile"}</b></button><div className="nav-note"><span className="live-dot" /> Realtime connection</div></div>
       </nav>
       {showZionIntro ? <div className="zion-overlay" role="dialog" aria-modal="true" aria-label="Welcome to ZION">
         <button className="zion-close" type="button" onClick={() => setShowZionIntro(false)} aria-label="Close animation">×</button>

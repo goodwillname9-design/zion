@@ -7,3 +7,12 @@ self.addEventListener("fetch", (event) => {
   if (event.request.mode === "navigate") { event.respondWith(fetch(event.request).then((response) => { const copy=response.clone(); caches.open(CACHE).then((cache)=>cache.put(event.request,copy)); return response; }).catch(()=>caches.match(event.request).then((cached)=>cached||caches.match("/")))); return; }
   event.respondWith(caches.match(event.request).then((cached)=>cached||fetch(event.request).then((response)=>{ if(response.ok&&["style","script","image","font"].includes(event.request.destination)){const copy=response.clone();caches.open(CACHE).then((cache)=>cache.put(event.request,copy));}return response;})));
 });
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = event.notification.data?.url || "/";
+  event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+    const existing = clients.find((client) => new URL(client.url).origin === self.location.origin);
+    if (existing) { existing.navigate(target); return existing.focus(); }
+    return self.clients.openWindow(target);
+  }));
+});
