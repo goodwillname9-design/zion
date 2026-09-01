@@ -330,7 +330,9 @@ function LoginScreen({
   const guestLogin = async () => {
     if (!supabase) return;
     if (guestUsed) {
-      setError("This device already created its one Guest account. Continue with Google instead.");
+      setError(
+        "This device already created its one Guest account. Continue with Google instead.",
+      );
       return;
     }
     const { error: loginError } = await supabase.auth.signInAnonymously();
@@ -388,17 +390,63 @@ function ProfileSetup({
   const [gender, setGender] = useState("male");
   const [country, setCountry] = useState("");
   const [avatar, setAvatar] = useState(avatars[0]);
+  const [profilePhoto, setProfilePhoto] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState("");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const photoInputRef = useRef<HTMLInputElement>(null);
   const countries = useMemo(() => countryOptions(), []);
+  useEffect(() => {
+    return () => {
+      if (photoPreview) URL.revokeObjectURL(photoPreview);
+    };
+  }, [photoPreview]);
+  const choosePhoto = (file?: File) => {
+    if (!file) return;
+    if (
+      !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+      file.size > 5 * 1024 * 1024
+    ) {
+      setError("Choose a JPG, PNG or WebP image under 5 MB.");
+      return;
+    }
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    setProfilePhoto(file);
+    setPhotoPreview(URL.createObjectURL(file));
+    setError("");
+  };
   const save = async () => {
     if (!supabase || username.trim().length < 3 || country.trim().length < 2)
       return;
+    setSaving(true);
+    setError("");
+    let avatar_url: string | null = null;
+    if (profilePhoto) {
+      const extension = profilePhoto.type.split("/")[1].replace("jpeg", "jpg");
+      const path = `${user.id}/profile.${extension}`;
+      const { error: uploadError } = await supabase.storage
+        .from("profile-avatars")
+        .upload(path, profilePhoto, {
+          upsert: true,
+          contentType: profilePhoto.type,
+        });
+      if (uploadError) {
+        setSaving(false);
+        setError(uploadError.message);
+        return;
+      }
+      const { data } = supabase.storage
+        .from("profile-avatars")
+        .getPublicUrl(path);
+      avatar_url = `${data.publicUrl}?v=${Date.now()}`;
+    }
     const row = {
       id: user.id,
       username: username.trim(),
       gender,
       country: country.trim(),
       avatar,
+      avatar_url,
     };
     const { data, error: saveError } = await supabase
       .from("profiles")
@@ -407,6 +455,7 @@ function ProfileSetup({
         "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason",
       )
       .single();
+    setSaving(false);
     if (saveError)
       setError(
         saveError.code === "23505"
@@ -457,12 +506,41 @@ function ProfileSetup({
           </label>
         </div>
         <span className="field-label">Choose an avatar</span>
+        <input
+          ref={photoInputRef}
+          hidden
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          onChange={(event) => choosePhoto(event.target.files?.[0])}
+        />
+        <button
+          type="button"
+          className="setup-photo-button"
+          onClick={() => photoInputRef.current?.click()}
+        >
+          {photoPreview ? (
+            <img src={photoPreview} alt="Selected profile preview" />
+          ) : (
+            <Camera />
+          )}
+          <span>
+            <b>
+              {photoPreview ? "Change gallery photo" : "Choose from gallery"}
+            </b>
+            <small>JPG, PNG or WebP · Maximum 5 MB</small>
+          </span>
+        </button>
+        <span className="avatar-divider">or choose an avatar</span>
         <div className="avatar-picker">
           {avatars.map((item) => (
             <button
               type="button"
               className={avatar === item ? "selected" : ""}
-              onClick={() => setAvatar(item)}
+              onClick={() => {
+                setAvatar(item);
+                setProfilePhoto(null);
+                setPhotoPreview("");
+              }}
               key={item}
             >
               {item}
@@ -476,10 +554,10 @@ function ProfileSetup({
         {error ? <p className="error-note">{error}</p> : null}
         <Button
           className="primary-action"
-          disabled={username.trim().length < 3 || !country}
+          disabled={saving || username.trim().length < 3 || !country}
           onClick={() => void save()}
         >
-          Enter ZION
+          {saving ? "Saving profile…" : "Enter ZION"}
         </Button>
       </section>
     </main>
@@ -518,9 +596,9 @@ function FriendsPanel({
   const [pins, setPins] = useState<string[]>([]);
   const [selected, setSelected] = useState<Friendship | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"friends" | "find" | "profile">(
-    "friends",
-  );
+  const [activeTab, setActiveTab] = useState<
+    "friends" | "notifications" | "find" | "profile"
+  >("friends");
   const [searchName, setSearchName] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchResult, setSearchResult] = useState<
@@ -598,6 +676,14 @@ function FriendsPanel({
       .eq("id", item.id);
     await load();
   };
+  const decline = async (item: Friendship) => {
+    if (!supabase) return;
+    await supabase
+      .from("friendships")
+      .update({ status: "declined" })
+      .eq("id", item.id);
+    await load();
+  };
   const togglePin = async (friendId: string) => {
     if (!supabase) return;
     if (pins.includes(friendId))
@@ -622,6 +708,13 @@ function FriendsPanel({
             Number(pins.includes(otherId(a))),
         ),
     [friendships, pins],
+  );
+  const pendingRequests = useMemo(
+    () =>
+      friendships.filter(
+        (item) => item.status === "pending" && item.addressee_id === user.id,
+      ),
+    [friendships, user.id],
   );
   const setAppTheme = (value: "dark" | "day") => {
     setTheme(value);
@@ -711,6 +804,19 @@ function FriendsPanel({
     if (!supabase) return;
     await supabase.auth.signOut();
     onClose();
+  };
+  const switchGuestToGoogle = async () => {
+    if (!supabase) return;
+    localStorage.setItem("zion-guest-created", "true");
+    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+        queryParams: { prompt: "select_account" },
+      },
+    });
+    if (error) alert(error.message);
   };
   if (selected)
     return (
@@ -825,13 +931,25 @@ function FriendsPanel({
             Save settings
           </Button>
           {user.is_anonymous ? (
-            <div className="guest-account-note">
-              <UserRound />
-              <span>
-                <b>Guest account on this device</b>
-                <small>This guest stays signed in until app/browser data is cleared. A second Guest account cannot be created on this device.</small>
-              </span>
-            </div>
+            <>
+              <div className="guest-account-note">
+                <UserRound />
+                <span>
+                  <b>Guest account on this device</b>
+                  <small>
+                    This guest stays signed in until app/browser data is
+                    cleared. A second Guest account cannot be created on this
+                    device.
+                  </small>
+                </span>
+              </div>
+              <button
+                className="google-switch-button"
+                onClick={() => void switchGuestToGoogle()}
+              >
+                <LogIn /> Continue with Gmail
+              </button>
+            </>
           ) : (
             <button className="logout-button" onClick={() => void logout()}>
               <LogOut /> Log out of ZION
@@ -872,6 +990,15 @@ function FriendsPanel({
             <Users /> Friends
           </button>
           <button
+            className={activeTab === "notifications" ? "active" : ""}
+            onClick={() => setActiveTab("notifications")}
+          >
+            <Bell /> Alerts
+            {pendingRequests.length ? (
+              <em className="notification-count">{pendingRequests.length}</em>
+            ) : null}
+          </button>
+          <button
             className={activeTab === "find" ? "active" : ""}
             onClick={() => setActiveTab("find")}
           >
@@ -884,7 +1011,44 @@ function FriendsPanel({
             <UserRound /> My Profile
           </button>
         </div>
-        {activeTab === "profile" ? (
+        {activeTab === "notifications" ? (
+          <div className="notification-center">
+            <h2>
+              <Bell /> Notification Center
+            </h2>
+            {pendingRequests.length ? (
+              pendingRequests.map((item) => {
+                const person = profiles[otherId(item)];
+                return (
+                  <div className="notification-request" key={item.id}>
+                    <ProfileAvatar profile={person} />
+                    <div>
+                      <b>{person?.username ?? "ZION user"}</b>
+                      <small>sent you a friend request</small>
+                    </div>
+                    <button
+                      className="request-decline"
+                      onClick={() => void decline(item)}
+                    >
+                      Decline
+                    </button>
+                    <button
+                      className="request-accept"
+                      onClick={() => void accept(item)}
+                    >
+                      Accept
+                    </button>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="empty-friends">
+                <Bell />
+                <p>No new friend requests.</p>
+              </div>
+            )}
+          </div>
+        ) : activeTab === "profile" ? (
           <ProfileDetails profile={profile} label="My ZION Profile" />
         ) : activeTab === "find" ? (
           <div className="find-friends">
@@ -1255,14 +1419,12 @@ function FriendChat({
     const value = text.trim();
     setText("");
     announceTyping(false);
-    await supabase
-      .from("friend_messages")
-      .insert({
-        friendship_id: friendship.id,
-        sender_id: user.id,
-        message: value,
-        reply_to_id: replyTo?.id ?? null,
-      });
+    await supabase.from("friend_messages").insert({
+      friendship_id: friendship.id,
+      sender_id: user.id,
+      message: value,
+      reply_to_id: replyTo?.id ?? null,
+    });
     setReplyTo(null);
     await load();
   };
@@ -1288,22 +1450,21 @@ function FriendChat({
       .from("chat-media")
       .upload(path, file, { contentType: file.type });
     if (!error)
-      await supabase
-        .from("friend_messages")
-        .insert({
-          friendship_id: friendship.id,
-          sender_id: user.id,
-          media_path: path,
-          media_type: mediaType,
-          reply_to_id: replyTo?.id ?? null,
-        });
+      await supabase.from("friend_messages").insert({
+        friendship_id: friendship.id,
+        sender_id: user.id,
+        media_path: path,
+        media_type: mediaType,
+        reply_to_id: replyTo?.id ?? null,
+      });
     else alert(error.message);
     setUploading(false);
     setReplyTo(null);
     await load();
   };
   const editMessage = async (item: FriendMessage) => {
-    if (!supabase || !item.message || item.deleted_at || item.media_path) return;
+    if (!supabase || !item.message || item.deleted_at || item.media_path)
+      return;
     const next = window.prompt("Edit message", item.message)?.trim();
     if (!next || next === item.message) return;
     const { error } = await supabase.rpc("edit_friend_message", {
@@ -1314,7 +1475,8 @@ function FriendChat({
     await load();
   };
   const deleteMessage = async (item: FriendMessage) => {
-    if (!supabase || item.deleted_at || !window.confirm("Delete this message?")) return;
+    if (!supabase || item.deleted_at || !window.confirm("Delete this message?"))
+      return;
     const { error } = await supabase.rpc("delete_friend_message", {
       p_message_id: item.id,
     });
@@ -1366,11 +1528,16 @@ function FriendChat({
       <div className="social-overlay">
         <section className="friends-panel profile-view-panel">
           <header>
-            <button onClick={() => setShowFriendProfile(false)}><ArrowLeft /></button>
+            <button onClick={() => setShowFriendProfile(false)}>
+              <ArrowLeft />
+            </button>
             <b>Friend Profile</b>
           </header>
           <ProfileDetails profile={friend} label="Friend Profile" />
-          <div className="profile-status-row"><i className={friendOnline ? "online" : "offline"} /><b>{friendOnline ? "Online now" : "Offline"}</b></div>
+          <div className="profile-status-row">
+            <i className={friendOnline ? "online" : "offline"} />
+            <b>{friendOnline ? "Online now" : "Offline"}</b>
+          </div>
         </section>
       </div>
     );
@@ -1382,11 +1549,18 @@ function FriendChat({
           <button onClick={back}>
             <ArrowLeft />
           </button>
-          <button className="chat-avatar profile-open" onClick={() => setShowFriendProfile(true)} aria-label="View friend profile">
+          <button
+            className="chat-avatar profile-open"
+            onClick={() => setShowFriendProfile(true)}
+            aria-label="View friend profile"
+          >
             <ProfileAvatar profile={friend} />
             <i className={friendOnline ? "online" : "offline"} />
           </button>
-          <button className="chat-person" onClick={() => setShowFriendProfile(true)}>
+          <button
+            className="chat-person"
+            onClick={() => setShowFriendProfile(true)}
+          >
             <b>{friend?.username ?? "ZION friend"}</b>
             <small>
               {callState === "active"
@@ -1454,33 +1628,81 @@ function FriendChat({
         </div>
         <div className="friend-message-list" ref={listRef}>
           {messages.map((item) => {
-            const quoted=messages.find(message=>message.id===item.reply_to_id);
+            const quoted = messages.find(
+              (message) => message.id === item.reply_to_id,
+            );
             return (
-            <div
-              key={item.id}
-              className={
-                item.sender_id === user.id
-                  ? "friend-bubble mine"
-                  : "friend-bubble theirs"
-              }
-            >
-              {quoted ? <div className="quoted-message"><Reply /> <span>{quoted.deleted_at ? "Message deleted" : quoted.message ?? (quoted.media_type === "image" ? "Photo" : "Video")}</span></div> : null}
-              {!item.deleted_at && item.media_url && item.media_type === "image" ? (
-                <img src={item.media_url} alt="Shared attachment" />
-              ) : null}
-              {!item.deleted_at && item.media_url && item.media_type === "video" ? (
-                <video src={item.media_url} controls playsInline />
-              ) : null}
-              {item.deleted_at ? <span className="deleted-message">Message deleted</span> : item.message ? <span>{item.message}</span> : null}
-              {!item.deleted_at ? <div className="message-actions"><button onClick={()=>setReplyTo(item)} title="Reply or mention"><Reply /></button>{item.sender_id===user.id&&!item.media_path?<button onClick={()=>void editMessage(item)} title="Edit"><Pencil /></button>:null}{item.sender_id===user.id?<button onClick={()=>void deleteMessage(item)} title="Delete"><Trash2 /></button>:null}</div>:null}
-              {item.edited_at&&!item.deleted_at?<em className="edited-label">edited</em>:null}
-              {item.sender_id === user.id ? (
-                <small className={item.read_at ? "read" : ""}>
-                  {item.read_at ? "✓✓" : "✓"}
-                </small>
-              ) : null}
-            </div>
-          )})}
+              <div
+                key={item.id}
+                className={
+                  item.sender_id === user.id
+                    ? "friend-bubble mine"
+                    : "friend-bubble theirs"
+                }
+              >
+                {quoted ? (
+                  <div className="quoted-message">
+                    <Reply />{" "}
+                    <span>
+                      {quoted.deleted_at
+                        ? "Message deleted"
+                        : (quoted.message ??
+                          (quoted.media_type === "image" ? "Photo" : "Video"))}
+                    </span>
+                  </div>
+                ) : null}
+                {!item.deleted_at &&
+                item.media_url &&
+                item.media_type === "image" ? (
+                  <img src={item.media_url} alt="Shared attachment" />
+                ) : null}
+                {!item.deleted_at &&
+                item.media_url &&
+                item.media_type === "video" ? (
+                  <video src={item.media_url} controls playsInline />
+                ) : null}
+                {item.deleted_at ? (
+                  <span className="deleted-message">Message deleted</span>
+                ) : item.message ? (
+                  <span>{item.message}</span>
+                ) : null}
+                {!item.deleted_at ? (
+                  <div className="message-actions">
+                    <button
+                      onClick={() => setReplyTo(item)}
+                      title="Reply or mention"
+                    >
+                      <Reply />
+                    </button>
+                    {item.sender_id === user.id && !item.media_path ? (
+                      <button
+                        onClick={() => void editMessage(item)}
+                        title="Edit"
+                      >
+                        <Pencil />
+                      </button>
+                    ) : null}
+                    {item.sender_id === user.id ? (
+                      <button
+                        onClick={() => void deleteMessage(item)}
+                        title="Delete"
+                      >
+                        <Trash2 />
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                {item.edited_at && !item.deleted_at ? (
+                  <em className="edited-label">edited</em>
+                ) : null}
+                {item.sender_id === user.id ? (
+                  <small className={item.read_at ? "read" : ""}>
+                    {item.read_at ? "✓✓" : "✓"}
+                  </small>
+                ) : null}
+              </div>
+            );
+          })}
           {friendOnline ? (
             <div
               className={
@@ -1500,7 +1722,26 @@ function FriendChat({
             </div>
           ) : null}
         </div>
-        {replyTo?<div className="reply-preview"><Reply/><div><b>Replying to {replyTo.sender_id===user.id?"yourself":friend?.username??"friend"}</b><span>{replyTo.message??(replyTo.media_type==="image"?"Photo":"Video")}</span></div><button onClick={()=>setReplyTo(null)}><X/></button></div>:null}
+        {replyTo ? (
+          <div className="reply-preview">
+            <Reply />
+            <div>
+              <b>
+                Replying to{" "}
+                {replyTo.sender_id === user.id
+                  ? "yourself"
+                  : (friend?.username ?? "friend")}
+              </b>
+              <span>
+                {replyTo.message ??
+                  (replyTo.media_type === "image" ? "Photo" : "Video")}
+              </span>
+            </div>
+            <button onClick={() => setReplyTo(null)}>
+              <X />
+            </button>
+          </div>
+        ) : null}
         <div className="friend-compose">
           <input
             ref={fileRef}

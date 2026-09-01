@@ -237,6 +237,29 @@ $$;
 revoke all on function public.find_random_match(text) from public;
 grant execute on function public.find_random_match(text) to authenticated;
 
+-- End a random conversation safely and notify the other participant through
+-- the shared conversation status. Both participants can then choose Next.
+create or replace function public.leave_random_conversation(
+  p_conversation_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then raise exception 'Authentication required'; end if;
+  update public.conversations
+  set status = 'ended'
+  where id = p_conversation_id
+    and status = 'active'
+    and (user_a = auth.uid() or user_b = auth.uid());
+  if not found then raise exception 'Active conversation not found'; end if;
+end;
+$$;
+revoke all on function public.leave_random_conversation(uuid) from public;
+grant execute on function public.leave_random_conversation(uuid) to authenticated;
+
 -- ZION profiles, permanent friends, pinned friends and private friend chat.
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
