@@ -24,6 +24,9 @@ Guest sessions remain in the current browser/app until its site/app data is clea
 6. Add this redirect URL:
    `https://zion-one-nu.vercel.app/**`
 
+If the browser shows `Unsupported provider: provider is not enabled`, Google
+is still disabled in Supabase or its Client ID/Secret has not been saved.
+
 Never put the Google Client Secret or Supabase service-role key in the app, GitHub, or Vercel public variables.
 
 ## 4. Media and moderation
@@ -32,4 +35,3 @@ Never put the Google Client Secret or Supabase service-role key in the app, GitH
 - Allowed media: JPEG, PNG, WebP, GIF, MP4, WebM, and QuickTime video.
 - Gender is self-declared and is not presented as identity-verified.
 - Admins can suspend a profile by setting `profiles.is_banned = true` and adding a `ban_reason` in Supabase Table Editor.
-

@@ -9,6 +9,8 @@ import {
   ImagePlus,
   LogIn,
   LogOut,
+  Mic,
+  MicOff,
   Moon,
   Pencil,
   Phone,
@@ -24,6 +26,8 @@ import {
   UserRound,
   UserRoundPlus,
   Users,
+  Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 import type { RealtimeChannel, User } from "@supabase/supabase-js";
@@ -1204,6 +1208,8 @@ function FriendChat({
     "idle" | "requesting" | "incoming" | "connecting" | "active"
   >("idle");
   const [callError, setCallError] = useState("");
+  const [muted, setMuted] = useState(false);
+  const [speakerOn, setSpeakerOn] = useState(true);
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
@@ -1212,6 +1218,7 @@ function FriendChat({
   const streamRef = useRef<MediaStream | null>(null);
   const typingStopRef = useRef<number | null>(null);
   const remoteTypingRef = useRef<number | null>(null);
+  const callTimeoutRef = useRef<number | null>(null);
   const load = useCallback(async () => {
     if (!supabase) return;
     await supabase.rpc("mark_friend_messages_read", {
@@ -1249,6 +1256,9 @@ function FriendChat({
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
       if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+      if (callTimeoutRef.current) window.clearTimeout(callTimeoutRef.current);
+      setMuted(false);
+      setSpeakerOn(true);
       setCallState("idle");
     },
     [user.id],
@@ -1500,6 +1510,16 @@ function FriendChat({
       event: "call-request",
       payload: { userId: user.id },
     });
+    if (callTimeoutRef.current) window.clearTimeout(callTimeoutRef.current);
+    callTimeoutRef.current = window.setTimeout(() => {
+      setCallState((current) => {
+        if (current === "requesting") {
+          setCallError("No answer. You can call again.");
+          return "idle";
+        }
+        return current;
+      });
+    }, 30000);
   };
   const answerCall = async (accepted: boolean) => {
     void liveRef.current?.send({
@@ -1518,6 +1538,18 @@ function FriendChat({
       setCallError("Allow microphone access to answer.");
       stopCall(false);
     }
+  };
+  const toggleMute = () => {
+    const next = !muted;
+    streamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = !next;
+    });
+    setMuted(next);
+  };
+  const toggleSpeaker = () => {
+    const next = !speakerOn;
+    if (remoteAudioRef.current) remoteAudioRef.current.muted = !next;
+    setSpeakerOn(next);
   };
   const back = () => {
     stopCall();
@@ -1613,6 +1645,25 @@ function FriendChat({
               ? "Waiting for permission…"
               : "Connecting private audio…"}
             <button onClick={() => stopCall()}>Cancel</button>
+          </div>
+        ) : null}
+        {callState === "active" ? (
+          <div className="active-call-controls">
+            <button className={muted ? "active" : ""} onClick={toggleMute}>
+              {muted ? <MicOff /> : <Mic />}
+              <span>{muted ? "Unmute" : "Mute"}</span>
+            </button>
+            <button
+              className={!speakerOn ? "active" : ""}
+              onClick={toggleSpeaker}
+            >
+              {speakerOn ? <Volume2 /> : <VolumeX />}
+              <span>{speakerOn ? "Speaker" : "Sound off"}</span>
+            </button>
+            <button className="end-control" onClick={() => stopCall()}>
+              <PhoneOff />
+              <span>End</span>
+            </button>
           </div>
         ) : null}
         {callError ? <p className="call-error">{callError}</p> : null}
