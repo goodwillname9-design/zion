@@ -29,6 +29,20 @@ is still disabled in Supabase or its Client ID/Secret has not been saved.
 
 Never put the Google Client Secret or Supabase service-role key in the app, GitHub, or Vercel public variables.
 
+## Email and password accounts
+
+Keep Supabase Authentication > Providers > Email enabled. Users can create an
+account with email/password, confirm their email when confirmation is enabled,
+and then choose their unique ZION username on the profile screen.
+
+## Browser audio-call limitation
+
+ZION keeps the screen awake during an active call when the browser supports the
+Wake Lock API and warns before closing the page. Mobile operating systems can
+still suspend or end a PWA call after the browser/app is fully closed. Reliable
+closed-app calling and manual earpiece/speaker routing require a native mobile
+app; headphones otherwise follow the phone or computer's selected audio output.
+
 ## 4. Media and moderation
 
 - Photos and videos are private Storage objects and limited to 15 MB.

@@ -376,13 +376,15 @@ input {
   justify-self: end;
   animation:
     zion-boy-in 0.8s 0.18s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    person-bob 3s 1s ease-in-out infinite;
+    person-bob 3s 1s ease-in-out infinite,
+    hug-boy 5s 2s ease-in-out infinite;
 }
 .zion-girl {
   justify-self: start;
   animation:
     zion-girl-in 0.8s 0.18s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    person-bob 3.4s 1.1s ease-in-out infinite reverse;
+    person-bob 3.4s 1.1s ease-in-out infinite reverse,
+    hug-girl 5s 2s ease-in-out infinite;
 }
 .person-head {
   position: absolute;
@@ -2376,6 +2378,17 @@ footer span {
   font-size: 8px;
   font-style: normal;
 }
+.remove-friend {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 79, 99, 0.18);
+  border-radius: 12px;
+  color: #ff8f98;
+  background: rgba(255, 79, 99, 0.07);
+  cursor: pointer;
+}
 .notification-center {
   flex: 1;
   overflow: auto;
@@ -2649,7 +2662,116 @@ footer span {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.account-divider {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 5px 0;
+  color: #777383;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.account-divider:before,
+.account-divider:after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.account-mode {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.account-mode button {
+  min-height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 11px;
+  color: #8e899b;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 9px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.account-mode button.active {
+  color: #17141f;
+  border-color: transparent;
+  background: #d9ff83;
+}
+.account-input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 13px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 13px;
+  outline: none;
+  color: #fff;
+  background: #111225;
+}
+.one-time-profile-edit {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 7px;
+}
+.one-time-profile-edit input,
+.one-time-profile-edit select {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  color: #eeeaf7;
+  background: #111225;
+}
+.one-time-profile-edit select option {
+  color: #111;
+}
+.one-time-profile-edit button {
+  padding: 0 13px;
+  border: 0;
+  border-radius: 12px;
+  color: #17141f;
+  background: linear-gradient(135deg, #d9ff83, #6df2c1);
+  font-size: 9px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.profile-edit-used {
+  padding: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  color: #8e899b;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 9px;
+}
 @media (max-width: 540px) {
+  .one-time-profile-edit {
+    grid-template-columns: 1fr;
+  }
+  .one-time-profile-edit button {
+    min-height: 44px;
+  }
+  .friend-row {
+    gap: 6px;
+    padding: 7px;
+  }
+  .friend-main {
+    min-width: 0;
+    gap: 7px;
+  }
+  .friend-main div {
+    min-width: 0;
+  }
+  .friend-main b,
+  .friend-main small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .streak-badge {
+    padding-inline: 5px;
+    font-size: 8px;
+  }
   .friends-tabs button {
     flex-direction: column;
     gap: 2px;
@@ -2813,6 +2935,28 @@ footer span {
 @keyframes person-bob {
   50% {
     margin-bottom: 8px;
+  }
+}
+@keyframes hug-boy {
+  0%,
+  35%,
+  100% {
+    transform: translateX(0) rotateY(10deg);
+  }
+  48%,
+  68% {
+    transform: translateX(34px) rotate(4deg) rotateY(4deg);
+  }
+}
+@keyframes hug-girl {
+  0%,
+  35%,
+  100% {
+    transform: translateX(0) rotateY(-10deg);
+  }
+  48%,
+  68% {
+    transform: translateX(-34px) rotate(-4deg) rotateY(-4deg);
   }
 }
 @keyframes boy-wave {

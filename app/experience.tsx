@@ -43,6 +43,7 @@ export type ZionProfile = {
   allow_audio_calls?: boolean;
   show_country?: boolean;
   show_online_status?: boolean;
+  profile_edit_used?: boolean;
 };
 
 export function Experience({
@@ -701,6 +702,11 @@ export function Experience({
                     : "Share my answer"}{" "}
                 <ArrowRight size={18} />
               </Button>
+              {!partnerLeft ? (
+                <Button variant="outline" onClick={() => void nextHuman()}>
+                  Skip waiting · Next human
+                </Button>
+              ) : null}
             </div>
           ) : null}
           {stage === "reveal" ? (

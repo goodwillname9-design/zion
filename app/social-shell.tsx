@@ -144,7 +144,7 @@ export function SocialShell() {
     const { data } = await supabase
       .from("profiles")
       .select(
-        "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status",
+        "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,profile_edit_used",
       )
       .eq("id", nextUser.id)
       .maybeSingle();
@@ -320,6 +320,10 @@ function LoginScreen({
       ? localStorage.getItem("zion-guest-created") === "true"
       : false,
   );
+  const [accountMode, setAccountMode] = useState<"login" | "signup">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [accountBusy, setAccountBusy] = useState(false);
   const googleLogin = async () => {
     if (!supabase) return;
     const { error: loginError } = await supabase.auth.signInWithOAuth({
@@ -346,6 +350,29 @@ function LoginScreen({
       setGuestUsed(true);
     }
   };
+  const emailAccount = async () => {
+    if (!supabase || !email.trim() || password.length < 6) return;
+    setAccountBusy(true);
+    setError("");
+    if (accountMode === "signup") {
+      const { data, error: signupError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+      });
+      if (signupError) setError(signupError.message);
+      else if (!data.session)
+        setError(
+          "Account created. Check your email and confirm it, then log in.",
+        );
+    } else {
+      const { error: loginError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (loginError) setError(loginError.message);
+    }
+    setAccountBusy(false);
+  };
   return (
     <main className="auth-shell">
       <section className="auth-card login-card">
@@ -366,6 +393,53 @@ function LoginScreen({
         {error ? <p className="error-note">{error}</p> : null}
         <Button className="primary-action" onClick={() => void googleLogin()}>
           <LogIn size={18} /> Continue with Google
+        </Button>
+        <div className="account-divider">
+          <span>or use email and password</span>
+        </div>
+        <div className="account-mode">
+          <button
+            className={accountMode === "login" ? "active" : ""}
+            onClick={() => setAccountMode("login")}
+          >
+            Log in
+          </button>
+          <button
+            className={accountMode === "signup" ? "active" : ""}
+            onClick={() => setAccountMode("signup")}
+          >
+            Create account
+          </button>
+        </div>
+        <input
+          className="account-input"
+          type="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="Email address"
+          autoComplete="email"
+        />
+        <input
+          className="account-input"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          onKeyDown={(event) => event.key === "Enter" && void emailAccount()}
+          placeholder="Password · minimum 6 characters"
+          autoComplete={
+            accountMode === "signup" ? "new-password" : "current-password"
+          }
+        />
+        <Button
+          variant="outline"
+          disabled={accountBusy || !email.trim() || password.length < 6}
+          onClick={() => void emailAccount()}
+        >
+          {accountBusy
+            ? "Please wait…"
+            : accountMode === "signup"
+              ? "Create ZION account"
+              : "Log in to ZION"}
         </Button>
         <Button
           variant="outline"
@@ -619,6 +693,8 @@ function FriendsPanel({
   const [allowCalls, setAllowCalls] = useState(true);
   const [showCountry, setShowCountry] = useState(true);
   const [showOnline, setShowOnline] = useState(true);
+  const [editUsername, setEditUsername] = useState(profile.username);
+  const [editCountry, setEditCountry] = useState(profile.country);
   const load = useCallback(async () => {
     if (!supabase) return;
     const [{ data: rows }, { data: pinRows }, { data: privacy }] =
@@ -702,6 +778,15 @@ function FriendsPanel({
         .insert({ user_id: user.id, friend_id: friendId });
     await load();
   };
+  const removeFriend = async (item: Friendship) => {
+    if (!supabase || !window.confirm("Remove this friend and private chat?"))
+      return;
+    const { error } = await supabase.rpc("remove_zion_friend", {
+      p_friendship_id: item.id,
+    });
+    if (error) alert(error.message);
+    else await load();
+  };
   const accepted = useMemo(
     () =>
       friendships
@@ -739,6 +824,27 @@ function FriendsPanel({
       })
       .eq("id", user.id);
     setSettingsOpen(false);
+  };
+  const saveOneTimeProfileEdit = async () => {
+    if (
+      !supabase ||
+      profile.profile_edit_used ||
+      editUsername.trim().length < 3 ||
+      !editCountry
+    )
+      return;
+    const { data, error } = await supabase.rpc("update_profile_once", {
+      p_username: editUsername.trim(),
+      p_country: editCountry,
+    });
+    if (error) alert(error.message);
+    else
+      onProfileUpdated({
+        ...profile,
+        username: editUsername.trim(),
+        country: editCountry,
+        profile_edit_used: true,
+      });
   };
   const findFriend = async () => {
     if (!supabase || !searchName.trim()) return;
@@ -877,6 +983,34 @@ function FriendsPanel({
               <Camera /> Add or change profile photo
             </button>
           </div>
+          <h3>One-time profile edit</h3>
+          {profile.profile_edit_used ? (
+            <p className="profile-edit-used">
+              Username and country have already been changed once.
+            </p>
+          ) : (
+            <div className="one-time-profile-edit">
+              <input
+                value={editUsername}
+                onChange={(event) => setEditUsername(event.target.value)}
+                maxLength={24}
+                placeholder="New unique username"
+              />
+              <select
+                value={editCountry}
+                onChange={(event) => setEditCountry(event.target.value)}
+              >
+                {countryOptions().map((item) => (
+                  <option key={item.code} value={item.code}>
+                    {item.flag} {item.name}
+                  </option>
+                ))}
+              </select>
+              <button onClick={() => void saveOneTimeProfileEdit()}>
+                Save once
+              </button>
+            </div>
+          )}
           <h3>Appearance</h3>
           <div className="theme-switch">
             <button
@@ -1166,6 +1300,13 @@ function FriendsPanel({
                       >
                         <Pin size={17} />
                       </button>
+                      <button
+                        className="remove-friend"
+                        onClick={() => void removeFriend(item)}
+                        aria-label="Remove friend"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </div>
                   );
                 })
@@ -1219,6 +1360,7 @@ function FriendChat({
   const typingStopRef = useRef<number | null>(null);
   const remoteTypingRef = useRef<number | null>(null);
   const callTimeoutRef = useRef<number | null>(null);
+  const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
   const load = useCallback(async () => {
     if (!supabase) return;
     await supabase.rpc("mark_friend_messages_read", {
@@ -1299,6 +1441,33 @@ function FriendChat({
     peerRef.current = peer;
     return peer;
   }, [stopCall, user.id]);
+  useEffect(() => {
+    if (callState !== "active") return;
+    const keepAwake = async () => {
+      try {
+        const wakeLockNavigator = navigator as Navigator & {
+          wakeLock?: {
+            request: (
+              type: "screen",
+            ) => Promise<{ release: () => Promise<void> }>;
+          };
+        };
+        wakeLockRef.current =
+          (await wakeLockNavigator.wakeLock?.request("screen")) ?? null;
+      } catch {}
+    };
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "An audio call is active.";
+    };
+    void keepAwake();
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => {
+      window.removeEventListener("beforeunload", warnBeforeLeaving);
+      void wakeLockRef.current?.release().catch(() => undefined);
+      wakeLockRef.current = null;
+    };
+  }, [callState]);
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => void load(), 1500);
