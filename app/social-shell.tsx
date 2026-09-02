@@ -95,7 +95,9 @@ const usernameAuthEmail = async (username: string) => {
   const hex = Array.from(new Uint8Array(digest), (byte) =>
     byte.toString(16).padStart(2, "0"),
   ).join("");
-  return `u-${hex}@accounts.zion.local`;
+  // Supabase validates this internal identifier as an email. Keep the local
+  // part well below the 64-character email limit; users never see or enter it.
+  return `u-${hex.slice(0, 48)}@login.zion-one-nu.vercel.app`;
 };
 function ProfileAvatar({
   profile,
