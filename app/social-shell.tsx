@@ -28,6 +28,7 @@ import {
   Users,
   Volume2,
   VolumeX,
+  Video,
   X,
 } from "lucide-react";
 import type { RealtimeChannel, User } from "@supabase/supabase-js";
@@ -1159,6 +1160,14 @@ function FriendsPanel({
             onClick={() => setActiveTab("profile")}
           >
             <UserRound /> My Profile
+          </button>
+          <button
+            className="meeting-tab"
+            onClick={() => {
+              window.location.href = "/meeting";
+            }}
+          >
+            <Video /> Meetings
           </button>
         </div>
         {activeTab === "notifications" ? (

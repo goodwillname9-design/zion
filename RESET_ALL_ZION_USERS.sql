@@ -1,6 +1,6 @@
 -- ZION COMPLETE ACCOUNT RESET
 -- WARNING: This permanently deletes every ZION account, profile, friendship,
--- stranger/friend message, call record and uploaded chat/profile media file.
+-- stranger/friend message and call record.
 -- Run this only in the correct Supabase project's SQL Editor.
 
 do $$
@@ -11,10 +11,6 @@ begin
   if not confirm_complete_reset then
     raise exception 'RESET CANCELLED. Change confirm_complete_reset to true only when you really want to delete every ZION account.';
   end if;
-
-  -- Storage metadata is removed first. Supabase will then remove the objects.
-  delete from storage.objects
-  where bucket_id in ('chat-media', 'profile-avatars');
 
   -- TRUNCATE every ZION table that exists. CASCADE safely resolves foreign keys.
   foreach table_name in array array[
@@ -34,3 +30,6 @@ begin
 end
 $$;
 
+-- Supabase blocks direct SQL deletion from storage.objects. To clear old media,
+-- delete the contents inside chat-media and profile-avatars from the Storage
+-- Dashboard. Keep both buckets so future uploads continue to work.

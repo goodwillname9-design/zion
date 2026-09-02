@@ -49,9 +49,10 @@ home page first loads.
 `RESET_ALL_ZION_USERS.sql` is deliberately separate from the normal setup.
 Open it, read the warning, change `confirm_complete_reset` from `false` to
 `true`, and run it once in Supabase SQL Editor. This permanently deletes every
-Google, email/password and guest account plus ZION profiles, chats, friends,
-calls and uploaded media. Run `SUPABASE_FINAL_SQL.sql` first if the database
-schema has not yet been installed.
+Google, email/password and guest account plus ZION profiles, chats, friends and
+calls. Supabase blocks direct SQL deletion of Storage objects: delete the files
+inside `chat-media` and `profile-avatars` from the Storage Dashboard, but keep
+the buckets. Run `SUPABASE_FINAL_SQL.sql` first if the schema is not installed.
 
 ## Browser audio-call limitation
 
@@ -60,6 +61,24 @@ Wake Lock API and warns before closing the page. Mobile operating systems can
 still suspend or end a PWA call after the browser/app is fully closed. Reliable
 closed-app calling and manual earpiece/speaker routing require a native mobile
 app; headphones otherwise follow the phone or computer's selected audio output.
+
+## Secure group meetings and screen sharing
+
+The **Friends → Meetings** section opens ZION Business Meetings. Signed-in
+users can create or join a private room using a Meeting ID and separate
+passcode. The passcode is not included in the invite link. Access is issued as
+a short-lived server-generated LiveKit token.
+
+Add these server-side Vercel environment variables and redeploy:
+
+- `LIVEKIT_URL`
+- `LIVEKIT_API_KEY`
+- `LIVEKIT_API_SECRET`
+
+Never use a `NEXT_PUBLIC_` prefix for the API key or secret. LiveKit provides
+group camera/audio, participant layouts, microphone/camera controls and screen
+sharing. Screen sharing availability depends on browser and operating-system
+support; mobile Safari has additional platform restrictions.
 
 ## 4. Media and moderation
 

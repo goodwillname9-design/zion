@@ -1,19 +1,29 @@
 import type { Metadata } from "next";
 import { Montserrat } from "next/font/google";
 import "./globals.css";
+import "@livekit/components-styles";
 import { PwaInstall } from "./pwa-install";
 
-const montserrat = Montserrat({ subsets: ["latin"], display: "swap", variable: "--font-montserrat" });
+const montserrat = Montserrat({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-montserrat",
+});
 
 export const metadata: Metadata = {
   title: "ZION",
-  description: "Meet a stranger through one thoughtful question and ten honest minutes.",
+  description:
+    "Meet a stranger through one thoughtful question and ten honest minutes.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
     apple: "/icons/zion-192.png",
   },
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "ZION" },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "ZION",
+  },
 };
 
 export const viewport = { themeColor: "#15132b", viewportFit: "cover" };
@@ -25,7 +35,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${montserrat.variable} antialiased`}>{children}<PwaInstall /></body>
+      <body className={`${montserrat.variable} antialiased`}>
+        {children}
+        <PwaInstall />
+      </body>
     </html>
   );
 }

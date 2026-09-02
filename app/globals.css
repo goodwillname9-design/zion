@@ -3045,6 +3045,216 @@ footer span {
   }
 }
 
+.meeting-tab {
+  color: #bfff89 !important;
+}
+.meeting-shell {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(
+    circle at 50% 0,
+    #2e1b55 0,
+    #100d20 48%,
+    #070812 100%
+  );
+  color: #f8f6ff;
+}
+.meeting-card {
+  width: min(620px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 34px;
+  padding: 34px;
+  background: rgba(20, 16, 39, 0.92);
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.45);
+}
+.meeting-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #fff;
+  text-decoration: none;
+  letter-spacing: 0.18em;
+}
+.meeting-brand:first-letter {
+  color: #07100b;
+  background: #8effbd;
+  border-radius: 12px;
+  padding: 6px 10px;
+}
+.meeting-icon {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  margin: 32px 0 18px;
+  border-radius: 18px;
+  color: #10131a;
+  background: linear-gradient(135deg, #c4ff80, #55eac0);
+}
+.meeting-card h1 {
+  margin: 8px 0 12px;
+  font-size: clamp(36px, 7vw, 64px);
+  line-height: 0.98;
+  letter-spacing: -0.06em;
+}
+.meeting-card > p {
+  color: #aaa4b9;
+  line-height: 1.6;
+}
+.meeting-card label {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  color: #c9c4d4;
+  font-size: 12px;
+  font-weight: 750;
+}
+.meeting-card label span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.meeting-card label svg {
+  width: 15px;
+}
+.meeting-card input {
+  width: 100%;
+  min-height: 52px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 15px;
+  padding: 0 16px;
+  background: #121023;
+  color: #fff;
+  font: inherit;
+  font-size: 15px;
+  outline: none;
+}
+.meeting-card input:focus {
+  border-color: #65efc7;
+  box-shadow: 0 0 0 3px rgba(101, 239, 199, 0.12);
+}
+.meeting-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 10px;
+  margin-top: 22px;
+}
+.meeting-actions button,
+.meeting-invite button {
+  min-height: 50px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: transparent;
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
+.meeting-actions .primary {
+  color: #0a1812;
+  border: 0;
+  background: linear-gradient(100deg, #c6ff80, #55eac0);
+}
+.meeting-actions svg,
+.meeting-invite svg {
+  width: 17px;
+}
+.meeting-error {
+  margin: 14px 0 0 !important;
+  padding: 11px 13px;
+  border: 1px solid rgba(255, 94, 118, 0.35);
+  border-radius: 12px;
+  background: rgba(130, 25, 48, 0.2);
+  color: #ff91a5 !important;
+  font-size: 12px;
+}
+.meeting-invite {
+  margin-top: 16px;
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(143, 255, 190, 0.22);
+  border-radius: 16px;
+  background: rgba(70, 190, 135, 0.07);
+}
+.meeting-invite > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.meeting-invite span {
+  display: grid;
+  gap: 3px;
+}
+.meeting-invite small,
+.meeting-note {
+  color: #8e899c;
+}
+.meeting-invite button {
+  min-height: 39px;
+  padding: 0 13px;
+}
+.meeting-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 18px;
+  font-size: 10px;
+}
+.meeting-note svg {
+  width: 14px;
+}
+.zion-meeting-active {
+  height: 100dvh;
+  background: #080711;
+  color: white;
+  overflow: hidden;
+}
+.zion-meeting-active > .meeting-secure-label {
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: #141126;
+  color: #b9ffd2;
+  font-size: 11px;
+  font-weight: 750;
+}
+.meeting-secure-label svg {
+  width: 15px;
+}
+.zion-meeting-active > .lk-room-container {
+  height: calc(100dvh - 42px);
+}
+@media (max-width: 640px) {
+  .meeting-card {
+    padding: 24px 18px;
+    border-radius: 25px;
+  }
+  .meeting-actions {
+    grid-template-columns: 1fr;
+  }
+  .meeting-invite {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .friends-tabs {
+    overflow-x: auto;
+    justify-content: flex-start;
+  }
+  .friends-tabs button {
+    flex: 0 0 auto;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .zion-overlay *,
   .brand {
