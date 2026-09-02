@@ -140,7 +140,7 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-montserrat), Montserrat, Arial, sans-serif;
+  font-family: "Montserrat Variable", Montserrat, Arial, sans-serif;
 }
 button,
 textarea,
@@ -3048,6 +3048,71 @@ footer span {
 .meeting-tab {
   color: #bfff89 !important;
 }
+.friend-call-buttons {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.call-button.video {
+  color: #9fffd4;
+  border-color: rgba(111, 255, 198, 0.22);
+}
+.private-video-stage {
+  position: relative;
+  width: 100%;
+  min-height: 260px;
+  max-height: 52dvh;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  background: #080712;
+}
+.private-video-stage > video:not(.local-video) {
+  width: 100%;
+  height: min(52dvh, 460px);
+  display: block;
+  object-fit: cover;
+  background: #080712;
+}
+.private-video-stage .local-video {
+  position: absolute;
+  z-index: 3;
+  right: 12px;
+  bottom: 12px;
+  width: min(28%, 150px);
+  aspect-ratio: 3/4;
+  border: 2px solid rgba(159, 255, 212, 0.75);
+  border-radius: 15px;
+  object-fit: cover;
+  background: #141126;
+  transform: scaleX(-1);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+.video-waiting {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  color: #aaa5b8;
+  background: radial-gradient(circle, #20183c, #090813);
+  font-size: 11px;
+}
+.video-waiting .profile-avatar {
+  width: 70px;
+  height: 70px;
+  font-size: 38px;
+}
+@media (max-width: 640px) {
+  .private-video-stage {
+    min-height: 220px;
+  }
+  .friend-call-buttons {
+    gap: 4px;
+  }
+}
 .zion-opening-intro {
   z-index: 500;
 }
@@ -3354,6 +3419,137 @@ footer span {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* Classic private-chat layout: consistent desktop and mobile composer. */
+.friend-chat {
+  width: min(100%, 780px);
+  padding: 20px;
+}
+.friend-message-list {
+  margin-top: 10px;
+  padding: 18px 10px;
+  border-radius: 18px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.018),
+    rgba(255, 255, 255, 0.006)
+  );
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+.empty-private-chat {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #817c8e;
+  text-align: center;
+}
+.empty-private-chat .profile-avatar {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 4px;
+  font-size: 38px;
+  opacity: 0.85;
+}
+.empty-private-chat b {
+  color: #dcd7e8;
+  font-size: 14px;
+}
+.empty-private-chat span {
+  max-width: 340px;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.friend-compose {
+  grid-template-columns: 92px minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 10px;
+  min-height: 72px;
+  padding: 11px 0 0;
+}
+.friend-compose input {
+  height: 52px;
+  padding: 0 18px;
+  border-radius: 16px;
+  font-size: 14px;
+}
+.friend-compose button {
+  height: 52px;
+  border-radius: 16px;
+  transition:
+    transform 0.18s ease,
+    opacity 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.friend-compose button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(89, 235, 185, 0.18);
+}
+.friend-compose button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+.friend-compose .media-button {
+  width: 92px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.friend-compose .media-button svg {
+  width: 19px;
+}
+.friend-compose .media-button span {
+  font-size: 9px;
+  font-weight: 800;
+}
+.friend-compose .send-button {
+  width: 52px;
+}
+.friend-compose .send-button svg {
+  width: 21px;
+}
+@media (max-width: 640px) {
+  .friend-chat {
+    padding: 12px;
+  }
+  .friend-chat header {
+    min-height: 58px;
+  }
+  .friend-message-list {
+    margin-top: 7px;
+    padding: 13px 5px;
+    border-radius: 14px;
+  }
+  .friend-compose {
+    grid-template-columns: 48px minmax(0, 1fr) 48px;
+    gap: 7px;
+    min-height: 66px;
+    padding-top: 9px;
+    padding-bottom: max(2px, env(safe-area-inset-bottom));
+  }
+  .friend-compose input,
+  .friend-compose button {
+    height: 48px;
+    border-radius: 15px;
+  }
+  .friend-compose input {
+    padding: 0 13px;
+    font-size: 16px;
+  }
+  .friend-compose .media-button {
+    width: 48px;
+  }
+  .friend-compose .media-button span {
+    display: none;
+  }
+  .friend-compose .send-button {
+    width: 48px;
+  }
+}
 @keyframes bubble-in {
   from {
     opacity: 0;
@@ -3615,5 +3811,28 @@ footer span {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .social-overlay .friend-chat {
+    padding: 12px;
+  }
+  .social-overlay .friend-chat .friend-message-list {
+    margin-top: 7px;
+    padding: 13px 5px;
+  }
+  .social-overlay .friend-chat .friend-compose {
+    grid-template-columns: 48px minmax(0, 1fr) 48px;
+    gap: 7px;
+    padding-top: 9px;
+  }
+  .social-overlay .friend-chat .friend-compose input,
+  .social-overlay .friend-chat .friend-compose button {
+    height: 48px;
+  }
+  .social-overlay .friend-chat .friend-compose .media-button,
+  .social-overlay .friend-chat .friend-compose .send-button {
+    width: 48px;
   }
 }

@@ -30,6 +30,7 @@ import {
   Volume2,
   VolumeX,
   Video,
+  VideoOff,
   X,
 } from "lucide-react";
 import type { RealtimeChannel, User } from "@supabase/supabase-js";
@@ -1486,11 +1487,16 @@ function FriendChat({
     "idle" | "requesting" | "incoming" | "connecting" | "active"
   >("idle");
   const [callError, setCallError] = useState("");
+  const [callKind, setCallKind] = useState<"audio" | "video">("audio");
   const [muted, setMuted] = useState(false);
+  const [cameraOn, setCameraOn] = useState(true);
   const [speakerOn, setSpeakerOn] = useState(true);
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const callKindRef = useRef<"audio" | "video">("audio");
   const liveRef = useRef<RealtimeChannel | null>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -1535,49 +1541,72 @@ function FriendChat({
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
       if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+      if (localVideoRef.current) localVideoRef.current.srcObject = null;
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = null;
+        remoteVideoRef.current.muted = false;
+      }
       if (callTimeoutRef.current) window.clearTimeout(callTimeoutRef.current);
       setMuted(false);
+      setCameraOn(true);
       setSpeakerOn(true);
       setCallState("idle");
     },
     [user.id],
   );
-  const ensurePeer = useCallback(async () => {
-    if (peerRef.current) return peerRef.current;
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true },
-      video: false,
-    });
-    streamRef.current = stream;
-    const peer = new RTCPeerConnection({
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" },
-      ],
-    });
-    stream.getTracks().forEach((track) => peer.addTrack(track, stream));
-    peer.onicecandidate = (event) => {
-      if (event.candidate)
-        void liveRef.current?.send({
-          type: "broadcast",
-          event: "rtc-ice",
-          payload: { userId: user.id, candidate: event.candidate.toJSON() },
-        });
-    };
-    peer.ontrack = (event) => {
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = event.streams[0];
-        void remoteAudioRef.current.play().catch(() => undefined);
+  const ensurePeer = useCallback(
+    async (kind = callKindRef.current) => {
+      if (peerRef.current) return peerRef.current;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+        video:
+          kind === "video"
+            ? {
+                facingMode: "user",
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              }
+            : false,
+      });
+      streamRef.current = stream;
+      if (kind === "video" && localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+        void localVideoRef.current.play().catch(() => undefined);
       }
-      setCallState("active");
-    };
-    peer.onconnectionstatechange = () => {
-      if (["failed", "disconnected", "closed"].includes(peer.connectionState))
-        stopCall(false);
-    };
-    peerRef.current = peer;
-    return peer;
-  }, [stopCall, user.id]);
+      const peer = new RTCPeerConnection({
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+        ],
+      });
+      stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+      peer.onicecandidate = (event) => {
+        if (event.candidate)
+          void liveRef.current?.send({
+            type: "broadcast",
+            event: "rtc-ice",
+            payload: { userId: user.id, candidate: event.candidate.toJSON() },
+          });
+      };
+      peer.ontrack = (event) => {
+        if (kind === "video" && remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+          void remoteVideoRef.current.play().catch(() => undefined);
+        } else if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = event.streams[0];
+          void remoteAudioRef.current.play().catch(() => undefined);
+        }
+        setCallState("active");
+      };
+      peer.onconnectionstatechange = () => {
+        if (["failed", "disconnected", "closed"].includes(peer.connectionState))
+          stopCall(false);
+      };
+      peerRef.current = peer;
+      return peer;
+    },
+    [stopCall, user.id],
+  );
   useEffect(() => {
     if (callState !== "active") return;
     const keepAwake = async () => {
@@ -1639,7 +1668,12 @@ function FriendChat({
           );
       })
       .on("broadcast", { event: "call-request" }, ({ payload }) => {
-        if (payload.userId !== user.id) setCallState("incoming");
+        if (payload.userId !== user.id) {
+          const kind = payload.kind === "video" ? "video" : "audio";
+          callKindRef.current = kind;
+          setCallKind(kind);
+          setCallState("incoming");
+        }
       })
       .on("broadcast", { event: "call-response" }, async ({ payload }) => {
         if (payload.userId === user.id) return;
@@ -1650,7 +1684,7 @@ function FriendChat({
         }
         try {
           setCallState("connecting");
-          const peer = await ensurePeer();
+          const peer = await ensurePeer(callKindRef.current);
           const offer = await peer.createOffer();
           await peer.setLocalDescription(offer);
           await channel.send({
@@ -1659,14 +1693,18 @@ function FriendChat({
             payload: { userId: user.id, description: offer },
           });
         } catch {
-          setCallError("Microphone permission is required.");
+          setCallError(
+            callKindRef.current === "video"
+              ? "Camera and microphone permission are required."
+              : "Microphone permission is required.",
+          );
           stopCall(false);
         }
       })
       .on("broadcast", { event: "rtc-offer" }, async ({ payload }) => {
         if (payload.userId === user.id) return;
         try {
-          const peer = await ensurePeer();
+          const peer = await ensurePeer(callKindRef.current);
           await peer.setRemoteDescription(payload.description);
           const answer = await peer.createAnswer();
           await peer.setLocalDescription(answer);
@@ -1676,7 +1714,9 @@ function FriendChat({
             payload: { userId: user.id, description: answer },
           });
         } catch {
-          setCallError("Audio connection failed.");
+          setCallError(
+            `${callKindRef.current === "video" ? "Video" : "Audio"} connection failed.`,
+          );
           stopCall(false);
         }
       })
@@ -1685,7 +1725,9 @@ function FriendChat({
         try {
           await peerRef.current?.setRemoteDescription(payload.description);
         } catch {
-          setCallError("Audio connection failed.");
+          setCallError(
+            `${callKindRef.current === "video" ? "Video" : "Audio"} connection failed.`,
+          );
           stopCall(false);
         }
       })
@@ -1800,21 +1842,23 @@ function FriendChat({
     if (replyTo?.id === item.id) setReplyTo(null);
     await load();
   };
-  const requestCall = () => {
+  const requestCall = (kind: "audio" | "video") => {
     setCallError("");
     if (!friendOnline) {
       setCallError("Friend is not in this chat now.");
       return;
     }
     if (friend?.allow_audio_calls === false) {
-      setCallError("This friend has disabled audio call requests.");
+      setCallError("This friend has disabled private call requests.");
       return;
     }
+    callKindRef.current = kind;
+    setCallKind(kind);
     setCallState("requesting");
     void liveRef.current?.send({
       type: "broadcast",
       event: "call-request",
-      payload: { userId: user.id },
+      payload: { userId: user.id, kind },
     });
     if (callTimeoutRef.current) window.clearTimeout(callTimeoutRef.current);
     callTimeoutRef.current = window.setTimeout(() => {
@@ -1839,9 +1883,13 @@ function FriendChat({
     }
     try {
       setCallState("connecting");
-      await ensurePeer();
+      await ensurePeer(callKindRef.current);
     } catch {
-      setCallError("Allow microphone access to answer.");
+      setCallError(
+        callKindRef.current === "video"
+          ? "Allow camera and microphone access to answer."
+          : "Allow microphone access to answer.",
+      );
       stopCall(false);
     }
   };
@@ -1855,7 +1903,15 @@ function FriendChat({
   const toggleSpeaker = () => {
     const next = !speakerOn;
     if (remoteAudioRef.current) remoteAudioRef.current.muted = !next;
+    if (remoteVideoRef.current) remoteVideoRef.current.muted = !next;
     setSpeakerOn(next);
+  };
+  const toggleCamera = () => {
+    const next = !cameraOn;
+    streamRef.current?.getVideoTracks().forEach((track) => {
+      track.enabled = next;
+    });
+    setCameraOn(next);
   };
   const back = () => {
     stopCall();
@@ -1902,7 +1958,7 @@ function FriendChat({
             <b>{friend?.username ?? "ZION friend"}</b>
             <small>
               {callState === "active"
-                ? "Audio call connected"
+                ? `${callKind === "video" ? "Video" : "Audio"} call connected`
                 : friendTyping
                   ? "Typing…"
                   : friendOnline
@@ -1910,31 +1966,67 @@ function FriendChat({
                     : "Offline · Permanent chat"}
             </small>
           </button>
-          {callState === "active" ? (
+          {callState !== "idle" ? (
             <button
               className="call-button end"
               onClick={() => stopCall()}
-              aria-label="End audio call"
+              aria-label="End call"
             >
               <PhoneOff />
             </button>
           ) : (
-            <button
-              className="call-button"
-              disabled={!friendOnline || callState !== "idle"}
-              onClick={requestCall}
-              aria-label="Request audio call"
-            >
-              <Phone />
-            </button>
+            <div className="friend-call-buttons">
+              <button
+                className="call-button"
+                disabled={!friendOnline}
+                onClick={() => requestCall("audio")}
+                aria-label="Request audio call"
+              >
+                <Phone />
+              </button>
+              <button
+                className="call-button video"
+                disabled={!friendOnline}
+                onClick={() => requestCall("video")}
+                aria-label="Request video call"
+              >
+                <Video />
+              </button>
+            </div>
           )}
         </header>
+        {callKind === "video" && callState !== "idle" ? (
+          <div className="private-video-stage">
+            <video ref={remoteVideoRef} autoPlay playsInline />
+            {callState !== "active" ? (
+              <div className="video-waiting">
+                <ProfileAvatar profile={friend} />
+                <span>Waiting for video permission…</span>
+              </div>
+            ) : null}
+            <video
+              className="local-video"
+              ref={localVideoRef}
+              autoPlay
+              playsInline
+              muted
+            />
+          </div>
+        ) : null}
         {callState === "incoming" ? (
           <div className="call-request">
             <ProfileAvatar profile={friend} />
             <div>
-              <b>{friend?.username ?? "Friend"} wants an audio call</b>
-              <small>Your microphone starts only after Allow.</small>
+              <b>
+                {friend?.username ?? "Friend"} wants a {callKind} call
+              </b>
+              <small>
+                Your{" "}
+                {callKind === "video"
+                  ? "camera and microphone start"
+                  : "microphone starts"}{" "}
+                only after Allow.
+              </small>
             </div>
             <button className="decline" onClick={() => void answerCall(false)}>
               Decline
@@ -1949,7 +2041,7 @@ function FriendChat({
             <span className="live-dot" />
             {callState === "requesting"
               ? "Waiting for permission…"
-              : "Connecting private audio…"}
+              : `Connecting private ${callKind}…`}
             <button onClick={() => stopCall()}>Cancel</button>
           </div>
         ) : null}
@@ -1966,6 +2058,15 @@ function FriendChat({
               {speakerOn ? <Volume2 /> : <VolumeX />}
               <span>{speakerOn ? "Speaker" : "Sound off"}</span>
             </button>
+            {callKind === "video" ? (
+              <button
+                className={!cameraOn ? "active" : ""}
+                onClick={toggleCamera}
+              >
+                {cameraOn ? <Camera /> : <VideoOff />}
+                <span>{cameraOn ? "Camera" : "Camera off"}</span>
+              </button>
+            ) : null}
             <button className="end-control" onClick={() => stopCall()}>
               <PhoneOff />
               <span>End</span>
@@ -1984,6 +2085,15 @@ function FriendChat({
           media.
         </div>
         <div className="friend-message-list" ref={listRef}>
+          {!messages.length ? (
+            <div className="empty-private-chat">
+              <ProfileAvatar profile={friend} />
+              <b>Start your conversation</b>
+              <span>
+                Messages, photos and videos stay in this private friend chat.
+              </span>
+            </div>
+          ) : null}
           {messages.map((item) => {
             const quoted = messages.find(
               (message) => message.id === item.reply_to_id,
@@ -2114,6 +2224,7 @@ function FriendChat({
             onClick={() => fileRef.current?.click()}
           >
             <ImagePlus />
+            <span>{uploading ? "Uploading" : "Gallery"}</span>
           </button>
           <input
             value={text}
@@ -2129,6 +2240,7 @@ function FriendChat({
           <button
             className="send-button"
             aria-label="Send message"
+            disabled={!text.trim()}
             onClick={() => void send()}
           >
             <Send />

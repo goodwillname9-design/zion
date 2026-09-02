@@ -1,14 +1,8 @@
 import type { Metadata } from "next";
-import { Montserrat } from "next/font/google";
+import "@fontsource-variable/montserrat";
 import "./globals.css";
 import "@livekit/components-styles";
 import { PwaInstall } from "./pwa-install";
-
-const montserrat = Montserrat({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-montserrat",
-});
 
 export const metadata: Metadata = {
   title: "ZION",
@@ -35,7 +29,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${montserrat.variable} antialiased`}>
+      <body className="antialiased">
         {children}
         <PwaInstall />
       </body>
