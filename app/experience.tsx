@@ -49,12 +49,14 @@ export type ZionProfile = {
 export function Experience({
   profile,
   onOpenFriends,
+  onOpenAccountManager,
 }: {
   profile?: ZionProfile;
   onOpenFriends?: () => void;
+  onOpenAccountManager?: () => void;
 }) {
   const [stage, setStage] = useState<Stage>("welcome");
-  const [showZionIntro, setShowZionIntro] = useState(true);
+  const [showZionIntro, setShowZionIntro] = useState(false);
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [userId, setUserId] = useState("");
   const [partnerId, setPartnerId] = useState("");
@@ -73,6 +75,19 @@ export function Experience({
   const [partnerLeft, setPartnerLeft] = useState(false);
   const [partnerOnline, setPartnerOnline] = useState(false);
   const [partnerTyping, setPartnerTyping] = useState(false);
+  const profileHoldTimer = useRef<number | null>(null);
+  const profileLongPressed = useRef(false);
+  const startProfileHold = () => {
+    profileLongPressed.current = false;
+    profileHoldTimer.current = window.setTimeout(() => {
+      profileLongPressed.current = true;
+      onOpenAccountManager?.();
+    }, 650);
+  };
+  const cancelProfileHold = () => {
+    if (profileHoldTimer.current) window.clearTimeout(profileHoldTimer.current);
+    profileHoldTimer.current = null;
+  };
   const messageListRef = useRef<HTMLDivElement>(null);
   const randomChannelRef = useRef<RealtimeChannel | null>(null);
   const typingTimerRef = useRef<number | null>(null);
@@ -450,8 +465,23 @@ export function Experience({
           <button
             className="profile-chip"
             type="button"
-            onClick={onOpenFriends}
-            aria-label="Open profile and friends"
+            onPointerDown={startProfileHold}
+            onPointerUp={cancelProfileHold}
+            onPointerCancel={cancelProfileHold}
+            onPointerLeave={cancelProfileHold}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              cancelProfileHold();
+              onOpenAccountManager?.();
+            }}
+            onClick={() => {
+              if (profileLongPressed.current) {
+                profileLongPressed.current = false;
+                return;
+              }
+              onOpenFriends?.();
+            }}
+            aria-label="Open profile. Hold to add or switch account"
           >
             <span>
               {profile?.avatar_url ? (

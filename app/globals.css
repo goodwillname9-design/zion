@@ -3048,6 +3048,98 @@ footer span {
 .meeting-tab {
   color: #bfff89 !important;
 }
+.zion-opening-intro {
+  z-index: 500;
+}
+.device-account-limit {
+  display: block;
+  margin-top: 12px;
+  color: #8f899e;
+  text-align: center;
+}
+.account-manager-card {
+  position: relative;
+  width: min(460px, calc(100% - 28px));
+}
+.account-manager-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 50%;
+  background: transparent;
+  color: white;
+  cursor: pointer;
+}
+.account-manager-close svg {
+  width: 17px;
+}
+.account-manager-icon {
+  width: 36px;
+  height: 36px;
+  margin-bottom: 12px;
+  color: #74efc4;
+}
+.saved-account-list {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  margin: 18px 0 12px;
+}
+.saved-account-list > div {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.035);
+  text-align: left;
+}
+.saved-account-list span {
+  display: grid;
+  gap: 3px;
+}
+.saved-account-list small {
+  color: #898393;
+  font-size: 9px;
+}
+.saved-account-list button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: #ff91a5;
+  font-size: 9px;
+  cursor: pointer;
+}
+.saved-account-list button svg {
+  width: 13px;
+}
+.account-switch-primary {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 15px;
+  background: linear-gradient(100deg, #c6ff80, #55eac0);
+  color: #0b1712;
+  font-weight: 850;
+  cursor: pointer;
+}
+.account-switch-primary svg {
+  width: 17px;
+}
 .meeting-shell {
   min-height: 100dvh;
   display: grid;

@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ArrowRight,
   Bell,
   CalendarDays,
   Camera,
   ImagePlus,
-  LogIn,
+  Heart,
   LogOut,
   Mic,
   MicOff,
@@ -64,6 +65,38 @@ type FriendMessage = {
 const avatars = ["👨🏽", "👨🏻‍🦱", "👨🏿‍🦲", "🧔🏼", "👩🏽", "👩🏻‍🦱", "👩🏿", "👱🏼‍♀️", "🧑🏾", "🧑🏻‍🦰"];
 const streakBadge = (count: number) =>
   count >= 360 ? "🖤💛❤️" : count >= 30 ? "❤️" : count >= 10 ? "💛" : "🖤";
+const DEVICE_ACCOUNTS_KEY = "zion-device-usernames";
+const deviceAccounts = () => {
+  if (typeof window === "undefined") return [] as string[];
+  try {
+    return JSON.parse(
+      localStorage.getItem(DEVICE_ACCOUNTS_KEY) || "[]",
+    ) as string[];
+  } catch {
+    return [] as string[];
+  }
+};
+const rememberDeviceAccount = (username: string) => {
+  const current = deviceAccounts();
+  if (
+    !current.some(
+      (item) => item.toLocaleLowerCase() === username.toLocaleLowerCase(),
+    )
+  )
+    localStorage.setItem(
+      DEVICE_ACCOUNTS_KEY,
+      JSON.stringify([...current, username].slice(-2)),
+    );
+};
+const usernameAuthEmail = async (username: string) => {
+  const normalized = username.normalize("NFKC").trim().toLocaleLowerCase();
+  const bytes = new TextEncoder().encode(normalized);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const hex = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  return `u-${hex}@accounts.zion.local`;
+};
 function ProfileAvatar({
   profile,
   className = "",
@@ -124,17 +157,15 @@ export function SocialShell() {
   const [profile, setProfile] = useState<ZionProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [friendsOpen, setFriendsOpen] = useState(false);
+  const [accountManagerOpen, setAccountManagerOpen] = useState(false);
   const [error, setError] = useState("");
   const [notificationPrompt, setNotificationPrompt] = useState(false);
   const [notificationToast, setNotificationToast] = useState("");
+  const [openingIntro, setOpeningIntro] = useState(true);
   useEffect(() => {
     document.documentElement.dataset.theme =
       localStorage.getItem("zion-theme") === "day" ? "day" : "dark";
   }, []);
-  useEffect(() => {
-    if (user?.is_anonymous) localStorage.setItem("zion-guest-created", "true");
-  }, [user]);
-
   const loadProfile = useCallback(async (nextUser: User | null) => {
     setUser(nextUser);
     if (!nextUser || !supabase) {
@@ -150,6 +181,7 @@ export function SocialShell() {
       .eq("id", nextUser.id)
       .maybeSingle();
     setProfile((data as ZionProfile | null) ?? null);
+    if (data?.username) rememberDeviceAccount(data.username);
     setLoading(false);
   }, []);
 
@@ -237,6 +269,8 @@ export function SocialShell() {
     setNotificationPrompt(false);
   };
 
+  if (openingIntro)
+    return <OpeningIntro onEnter={() => setOpeningIntro(false)} />;
   if (loading) return <AuthScreen title="Opening ZION…" />;
   if (!supabase)
     return <AuthScreen title="ZION needs Supabase configuration." />;
@@ -249,6 +283,7 @@ export function SocialShell() {
       <Experience
         profile={profile}
         onOpenFriends={() => setFriendsOpen(true)}
+        onOpenAccountManager={() => setAccountManagerOpen(true)}
       />
       {friendsOpen ? (
         <FriendsPanel
@@ -256,6 +291,12 @@ export function SocialShell() {
           profile={profile}
           onProfileUpdated={setProfile}
           onClose={() => setFriendsOpen(false)}
+        />
+      ) : null}
+      {accountManagerOpen ? (
+        <AccountManager
+          currentUsername={profile.username}
+          onClose={() => setAccountManagerOpen(false)}
         />
       ) : null}
       {notificationToast ? (
@@ -309,6 +350,60 @@ function AuthScreen({ title }: { title: string }) {
   );
 }
 
+function OpeningIntro({ onEnter }: { onEnter: () => void }) {
+  return (
+    <main
+      className="zion-overlay zion-opening-intro"
+      aria-label="Welcome to ZION"
+    >
+      <div className="zion-stars">
+        <i />
+        <i />
+        <i />
+        <i />
+        <i />
+      </div>
+      <div className="zion-title">
+        <span>WELCOME TO</span>
+        <strong>ZION</strong>
+        <small>Meet, connect and stay close.</small>
+      </div>
+      <div className="zion-people" aria-hidden="true">
+        <div className="zion-person zion-boy">
+          <div className="hi-bubble">Hi!</div>
+          <div className="person-head">
+            <i className="hair" />
+            <i className="eye eye-one" />
+            <i className="eye eye-two" />
+            <i className="smile" />
+          </div>
+          <div className="person-body" />
+          <div className="wave-arm" />
+        </div>
+        <div className="hello-line">
+          <i />
+          <Heart size={25} fill="currentColor" />
+          <i />
+        </div>
+        <div className="zion-person zion-girl">
+          <div className="hi-bubble">Hello!</div>
+          <div className="person-head">
+            <i className="hair" />
+            <i className="eye eye-one" />
+            <i className="eye eye-two" />
+            <i className="smile" />
+          </div>
+          <div className="person-body" />
+          <div className="wave-arm" />
+        </div>
+      </div>
+      <button className="zion-enter" type="button" onClick={onEnter}>
+        Enter ZION <ArrowRight size={17} />
+      </button>
+    </main>
+  );
+}
+
 function LoginScreen({
   error,
   setError,
@@ -316,61 +411,50 @@ function LoginScreen({
   error: string;
   setError: (value: string) => void;
 }) {
-  const [guestUsed, setGuestUsed] = useState(() =>
-    typeof window !== "undefined"
-      ? localStorage.getItem("zion-guest-created") === "true"
-      : false,
-  );
   const [accountMode, setAccountMode] = useState<"login" | "signup">("login");
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [accountBusy, setAccountBusy] = useState(false);
-  const googleLogin = async () => {
-    if (!supabase) return;
-    const { error: loginError } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: window.location.origin,
-        queryParams: { prompt: "select_account" },
-      },
-    });
-    if (loginError) setError(loginError.message);
-  };
-  const guestLogin = async () => {
-    if (!supabase) return;
-    if (guestUsed) {
+  const usernameAccount = async () => {
+    if (!supabase || username.trim().length < 3 || password.length < 6) return;
+    const saved = deviceAccounts();
+    const known = saved.some(
+      (item) =>
+        item.toLocaleLowerCase() === username.trim().toLocaleLowerCase(),
+    );
+    if (!known && saved.length >= 2) {
       setError(
-        "This device already created its one Guest account. Continue with Google instead.",
+        "This device already has two ZION accounts. Remove one saved account before adding another.",
       );
       return;
     }
-    const { error: loginError } = await supabase.auth.signInAnonymously();
-    if (loginError) setError(loginError.message);
-    else {
-      localStorage.setItem("zion-guest-created", "true");
-      setGuestUsed(true);
-    }
-  };
-  const emailAccount = async () => {
-    if (!supabase || !email.trim() || password.length < 6) return;
     setAccountBusy(true);
     setError("");
+    const authEmail = await usernameAuthEmail(username);
     if (accountMode === "signup") {
       const { data, error: signupError } = await supabase.auth.signUp({
-        email: email.trim(),
+        email: authEmail,
         password,
+        options: { data: { zion_username: username.trim() } },
       });
-      if (signupError) setError(signupError.message);
+      if (signupError)
+        setError(
+          signupError.message.toLowerCase().includes("registered")
+            ? "That username is already registered. Choose another username or log in."
+            : signupError.message,
+        );
       else if (!data.session)
         setError(
-          "Account created. Check your email and confirm it, then log in.",
+          "Disable Confirm email in Supabase Authentication settings, then try again.",
         );
+      else rememberDeviceAccount(username.trim());
     } else {
       const { error: loginError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: authEmail,
         password,
       });
-      if (loginError) setError(loginError.message);
+      if (loginError) setError("Incorrect username or password.");
+      else rememberDeviceAccount(username.trim());
     }
     setAccountBusy(false);
   };
@@ -381,8 +465,8 @@ function LoginScreen({
         <span className="mini-label">Welcome to ZION</span>
         <h1>Meet kindly. Stay safely.</h1>
         <p>
-          Google accounts keep friends and chats across devices. Guest access
-          lasts until app/browser data is cleared.
+          Create a private username and password. Use the same details to log in
+          on another phone or computer.
         </p>
         <div className="moderation-banner">
           <ShieldAlert size={18} />
@@ -392,12 +476,6 @@ function LoginScreen({
           </span>
         </div>
         {error ? <p className="error-note">{error}</p> : null}
-        <Button className="primary-action" onClick={() => void googleLogin()}>
-          <LogIn size={18} /> Continue with Google
-        </Button>
-        <div className="account-divider">
-          <span>or use email and password</span>
-        </div>
         <div className="account-mode">
           <button
             className={accountMode === "login" ? "active" : ""}
@@ -414,18 +492,18 @@ function LoginScreen({
         </div>
         <input
           className="account-input"
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="Email address"
-          autoComplete="email"
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          placeholder="Unique username · any language"
+          autoComplete="username"
+          maxLength={24}
         />
         <input
           className="account-input"
           type="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          onKeyDown={(event) => event.key === "Enter" && void emailAccount()}
+          onKeyDown={(event) => event.key === "Enter" && void usernameAccount()}
           placeholder="Password · minimum 6 characters"
           autoComplete={
             accountMode === "signup" ? "new-password" : "current-password"
@@ -433,8 +511,10 @@ function LoginScreen({
         />
         <Button
           variant="outline"
-          disabled={accountBusy || !email.trim() || password.length < 6}
-          onClick={() => void emailAccount()}
+          disabled={
+            accountBusy || username.trim().length < 3 || password.length < 6
+          }
+          onClick={() => void usernameAccount()}
         >
           {accountBusy
             ? "Please wait…"
@@ -442,19 +522,79 @@ function LoginScreen({
               ? "Create ZION account"
               : "Log in to ZION"}
         </Button>
-        <Button
-          variant="outline"
-          className="guest-action"
-          disabled={guestUsed}
-          onClick={() => void guestLogin()}
-        >
-          {guestUsed ? "Guest account already created" : "Continue as guest"}
-        </Button>
+        <small className="device-account-limit">
+          Maximum two saved ZION accounts on this device.
+        </small>
         <small>
           18+ only · Gender is self-declared, not identity-verified.
         </small>
       </section>
     </main>
+  );
+}
+
+function AccountManager({
+  currentUsername,
+  onClose,
+}: {
+  currentUsername: string;
+  onClose: () => void;
+}) {
+  const [accounts, setAccounts] = useState<string[]>(() => deviceAccounts());
+  const continueToLogin = async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    onClose();
+  };
+  const forget = (username: string) => {
+    const next = accounts.filter((item) => item !== username);
+    localStorage.setItem(DEVICE_ACCOUNTS_KEY, JSON.stringify(next));
+    setAccounts(next);
+  };
+  return (
+    <div className="notification-overlay" role="dialog" aria-modal="true">
+      <section className="notification-card account-manager-card">
+        <button
+          className="account-manager-close"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          <X />
+        </button>
+        <UserRound className="account-manager-icon" />
+        <span className="mini-label">ZION ACCOUNTS</span>
+        <h2>Add or switch account</h2>
+        <p>Use a username and password to enter from this or another device.</p>
+        <div className="saved-account-list">
+          {accounts.map((name) => (
+            <div key={name}>
+              <UserRound />
+              <span>
+                <b>@{name}</b>
+                <small>
+                  {name === currentUsername
+                    ? "Currently signed in"
+                    : "Saved on this device"}
+                </small>
+              </span>
+              {name !== currentUsername ? (
+                <button onClick={() => forget(name)}>
+                  <Trash2 /> Forget
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+        <button
+          className="account-switch-primary"
+          onClick={() => void continueToLogin()}
+        >
+          <UserRoundPlus />{" "}
+          {accounts.length < 2 ? "Add another account" : "Switch account"}
+        </button>
+        <small>For safety, passwords are never saved in this list.</small>
+      </section>
+    </div>
   );
 }
 
@@ -465,7 +605,11 @@ function ProfileSetup({
   user: User;
   onSaved: (profile: ZionProfile) => void;
 }) {
-  const [username, setUsername] = useState("");
+  const accountUsername =
+    typeof user.user_metadata?.zion_username === "string"
+      ? user.user_metadata.zion_username
+      : "";
+  const [username, setUsername] = useState(accountUsername);
   const [gender, setGender] = useState("male");
   const [country, setCountry] = useState("");
   const [avatar, setAvatar] = useState(avatars[0]);
@@ -553,6 +697,7 @@ function ProfileSetup({
           <input
             value={username}
             onChange={(event) => setUsername(event.target.value)}
+            readOnly={Boolean(accountUsername)}
             maxLength={24}
             placeholder="Any language · 3–24 characters"
           />
@@ -916,22 +1061,8 @@ function FriendsPanel({
     await supabase.auth.signOut();
     onClose();
   };
-  const switchGuestToGoogle = async () => {
+  const switchAccount = async () => {
     if (!supabase) return;
-    localStorage.setItem("zion-guest-created", "true");
-    await supabase.auth.signOut();
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: window.location.origin,
-        queryParams: { prompt: "select_account" },
-      },
-    });
-    if (error) alert(error.message);
-  };
-  const switchGuestToAccountLogin = async () => {
-    if (!supabase) return;
-    localStorage.setItem("zion-guest-created", "true");
     await supabase.auth.signOut();
     onClose();
   };
@@ -1000,8 +1131,13 @@ function FriendsPanel({
               <input
                 value={editUsername}
                 onChange={(event) => setEditUsername(event.target.value)}
+                readOnly={Boolean(user.user_metadata?.zion_username)}
                 maxLength={24}
-                placeholder="New unique username"
+                title={
+                  user.user_metadata?.zion_username
+                    ? "Login username is permanent"
+                    : "New unique username"
+                }
               />
               <select
                 value={editCountry}
@@ -1075,37 +1211,15 @@ function FriendsPanel({
           <Button className="primary-action" onClick={() => void savePrivacy()}>
             Save settings
           </Button>
-          {user.is_anonymous ? (
-            <>
-              <div className="guest-account-note">
-                <UserRound />
-                <span>
-                  <b>Guest account on this device</b>
-                  <small>
-                    This guest stays signed in until app/browser data is
-                    cleared. A second Guest account cannot be created on this
-                    device.
-                  </small>
-                </span>
-              </div>
-              <button
-                className="google-switch-button"
-                onClick={() => void switchGuestToGoogle()}
-              >
-                <LogIn /> Continue with Gmail
-              </button>
-              <button
-                className="account-switch-button"
-                onClick={() => void switchGuestToAccountLogin()}
-              >
-                <UserRound /> Switch account · Email & password
-              </button>
-            </>
-          ) : (
-            <button className="logout-button" onClick={() => void logout()}>
-              <LogOut /> Log out of ZION
-            </button>
-          )}
+          <button
+            className="account-switch-button"
+            onClick={() => void switchAccount()}
+          >
+            <UserRoundPlus /> Add or switch account
+          </button>
+          <button className="logout-button" onClick={() => void logout()}>
+            <LogOut /> Log out of ZION
+          </button>
         </section>
       </div>
     );
