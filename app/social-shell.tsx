@@ -883,7 +883,7 @@ function FriendsPanel({
       const { data } = await supabase
         .from("profiles")
         .select(
-          "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status",
+          "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,is_admin",
         )
         .in("id", ids);
       setProfiles(
