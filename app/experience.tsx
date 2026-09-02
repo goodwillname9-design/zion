@@ -44,6 +44,7 @@ export type ZionProfile = {
   show_country?: boolean;
   show_online_status?: boolean;
   profile_edit_used?: boolean;
+  is_admin?: boolean;
 };
 
 export function Experience({

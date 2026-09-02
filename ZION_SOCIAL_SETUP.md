@@ -19,10 +19,21 @@ usernames per browser/device and never stores passwords. This device limit is
 a convenience control: clearing browser storage or using another browser resets
 the local list.
 
-The login username is permanent for new accounts. Country can be changed once
-from Profile Settings. Hold the profile button for about one second to open
+The login username is permanent for regular accounts. Country can be changed once
+from Profile Settings. The ZION owner account can change its displayed username
+and country whenever needed; its original login username remains the credential
+used to sign in. Hold the profile button for about one second to open
 **Add or switch account**. The welcome hug animation appears before login every
 time the site/app is freshly opened.
+
+## ZION owner admin account
+
+Run the complete latest `SUPABASE_FINAL_SQL.sql` once after deploying this
+version. It assigns admin access only to profile UUID
+`fd62030e-f3b8-4c14-bce7-a1f3eedbb74b` (`Ceo mubieeyy`). Sign out and sign in
+again after running it. The profile displays **ADMIN · ZION OWNER**, and
+**Friends → Admin** lists profiles with Ban and Unban controls. Never expose a
+Supabase service-role key in browser code or public environment variables.
 
 ## Optional: delete every existing account and start fresh
 

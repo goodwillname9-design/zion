@@ -134,6 +134,9 @@ function ProfileDetails({
       <ProfileAvatar profile={profile} />
       <span className="mini-label">{label}</span>
       <h2>{profile.username}</h2>
+      {profile.is_admin ? (
+        <span className="admin-profile-badge">ADMIN · ZION OWNER</span>
+      ) : null}
       <p className="profile-handle">@{profile.username}</p>
       <div className="profile-facts">
         <div>
@@ -179,7 +182,7 @@ export function SocialShell() {
     const { data } = await supabase
       .from("profiles")
       .select(
-        "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,profile_edit_used",
+        "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,profile_edit_used,is_admin",
       )
       .eq("id", nextUser.id)
       .maybeSingle();
@@ -824,7 +827,7 @@ function FriendsPanel({
   const [selected, setSelected] = useState<Friendship | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "friends" | "notifications" | "find" | "profile"
+    "friends" | "notifications" | "find" | "profile" | "admin"
   >("friends");
   const [searchName, setSearchName] = useState("");
   const [searching, setSearching] = useState(false);
@@ -975,13 +978,22 @@ function FriendsPanel({
     setSettingsOpen(false);
   };
   const saveOneTimeProfileEdit = async () => {
-    if (
-      !supabase ||
-      profile.profile_edit_used ||
-      editUsername.trim().length < 3 ||
-      !editCountry
-    )
+    if (!supabase || editUsername.trim().length < 3 || !editCountry) return;
+    if (profile.is_admin) {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ username: editUsername.trim(), country: editCountry })
+        .eq("id", user.id);
+      if (error) alert(error.message);
+      else
+        onProfileUpdated({
+          ...profile,
+          username: editUsername.trim(),
+          country: editCountry,
+        });
       return;
+    }
+    if (profile.profile_edit_used) return;
     const { data, error } = await supabase.rpc("update_profile_once", {
       p_username: editUsername.trim(),
       p_country: editCountry,
@@ -1251,6 +1263,16 @@ function FriendsPanel({
           </button>
         </header>
         <div className="friends-tabs">
+          {profile.is_admin ? (
+            <button
+              className={
+                activeTab === "admin" ? "active admin-tab" : "admin-tab"
+              }
+              onClick={() => setActiveTab("admin")}
+            >
+              <ShieldAlert /> Admin
+            </button>
+          ) : null}
           <button
             className={activeTab === "friends" ? "active" : ""}
             onClick={() => setActiveTab("friends")}
@@ -1287,7 +1309,9 @@ function FriendsPanel({
             <Video /> Meetings
           </button>
         </div>
-        {activeTab === "notifications" ? (
+        {activeTab === "admin" ? (
+          <AdminPanel user={user} />
+        ) : activeTab === "notifications" ? (
           <div className="notification-center">
             <h2>
               <Bell /> Notification Center
@@ -1461,6 +1485,99 @@ function FriendsPanel({
           </>
         )}
       </section>
+    </div>
+  );
+}
+
+function AdminPanel({ user }: { user: User }) {
+  const [rows, setRows] = useState<ZionProfile[]>([]);
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    if (!supabase) return;
+    const { data } = await supabase
+      .from("profiles")
+      .select(
+        "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,is_admin",
+      )
+      .order("created_at", { ascending: false });
+    setRows((data as ZionProfile[] | null) ?? []);
+  }, []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  const toggleBan = async (profile: ZionProfile) => {
+    if (!supabase || profile.id === user.id) return;
+    setBusy(true);
+    const next = !profile.is_banned;
+    const reason = next
+      ? window.prompt(
+          "Ban reason",
+          profile.ban_reason ?? "Community safety violation",
+        )
+      : null;
+    if (next && reason === null) {
+      setBusy(false);
+      return;
+    }
+    const { error } = await supabase
+      .from("profiles")
+      .update({ is_banned: next, ban_reason: next ? reason : null })
+      .eq("id", profile.id);
+    if (error) alert(error.message);
+    else await load();
+    setBusy(false);
+  };
+  const filtered = rows.filter((item) =>
+    item.username.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+  );
+  return (
+    <div className="admin-panel">
+      <div className="admin-heading">
+        <div>
+          <span className="mini-label">OWNER CONTROLS</span>
+          <h2>
+            <ShieldAlert /> Admin profiles
+          </h2>
+        </div>
+        <small>{rows.length} accounts</small>
+      </div>
+      <p className="admin-warning">
+        Only the ceo mubieeyy owner account can use these controls.
+      </p>
+      <input
+        className="admin-search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Search username"
+      />{" "}
+      <div className="admin-list">
+        {filtered.map((item) => (
+          <div className="admin-row" key={item.id}>
+            <ProfileAvatar profile={item} />
+            <div>
+              <b>{item.username}</b>
+              <small>
+                {countryLabel(item.country)} · {item.gender}
+              </small>
+            </div>
+            {item.id === user.id ? (
+              <em>ADMIN</em>
+            ) : (
+              <button
+                disabled={busy}
+                className={item.is_banned ? "unban" : "ban"}
+                onClick={() => void toggleBan(item)}
+              >
+                {item.is_banned ? "Unban" : "Ban"}
+              </button>
+            )}
+          </div>
+        ))}
+        {!filtered.length ? (
+          <p className="admin-empty">No matching profiles.</p>
+        ) : null}
+      </div>
     </div>
   );
 }

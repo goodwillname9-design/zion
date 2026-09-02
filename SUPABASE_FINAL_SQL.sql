@@ -240,6 +240,24 @@ begin
 end;
 $$;
 
+-- Owner-only moderation role. Replace the UUID only if the owner account changes.
+alter table public.profiles add column if not exists is_admin boolean not null default false;
+update public.profiles
+set is_admin = true
+where id = 'fd62030e-f3b8-4c14-bce7-a1f3eedbb74b';
+
+create or replace function public.is_zion_admin()
+returns boolean language sql stable security definer set search_path = ''
+as $$ select exists (select 1 from public.profiles where id = auth.uid() and is_admin = true); $$;
+revoke all on function public.is_zion_admin() from public;
+grant execute on function public.is_zion_admin() to authenticated;
+
+drop policy if exists "Admins update all profiles" on public.profiles;
+create policy "Admins update all profiles"
+on public.profiles for update to authenticated
+using (public.is_zion_admin())
+with check (true);
+
 revoke all on function public.find_random_match(text) from public;
 grant execute on function public.find_random_match(text) to authenticated;
 

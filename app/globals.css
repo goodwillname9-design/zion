@@ -3113,6 +3113,101 @@ footer span {
     gap: 4px;
   }
 }
+
+.admin-tab {
+  color: #c9ff8f !important;
+  border-color: rgba(201, 255, 143, 0.45) !important;
+}
+.admin-profile-badge {
+  display: inline-flex;
+  margin-top: 6px;
+  padding: 4px 9px;
+  border: 1px solid rgba(201, 255, 143, 0.55);
+  border-radius: 999px;
+  color: #c9ff8f;
+  background: rgba(201, 255, 143, 0.1);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.admin-panel {
+  padding: 18px 0 28px;
+}
+.admin-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+}
+.admin-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 5px 0 0;
+}
+.admin-heading small,
+.admin-row small {
+  color: var(--muted);
+}
+.admin-warning {
+  color: #f5c78c;
+  font-size: 13px;
+}
+.admin-search {
+  width: 100%;
+  margin: 8px 0 14px;
+}
+.admin-list {
+  display: grid;
+  gap: 8px;
+}
+.admin-row {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.admin-row > div {
+  min-width: 0;
+}
+.admin-row small {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.admin-row em {
+  color: #c9ff8f;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.admin-row button {
+  min-width: 64px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-weight: 700;
+}
+.admin-row button.ban {
+  color: #ffb4bd;
+  border-color: rgba(255, 120, 135, 0.4);
+}
+.admin-row button.unban {
+  color: #c9ff8f;
+  border-color: rgba(201, 255, 143, 0.45);
+}
+.admin-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 20px;
+}
 .zion-opening-intro {
   z-index: 500;
 }
