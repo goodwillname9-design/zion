@@ -2620,6 +2620,25 @@ footer span {
   font-weight: 900;
   cursor: pointer;
 }
+.account-switch-button {
+  width: 100%;
+  min-height: 45px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  color: #ddd8eb;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.account-switch-button svg {
+  width: 16px;
+}
 .google-switch-button svg {
   width: 17px;
 }

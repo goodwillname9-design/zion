@@ -29,11 +29,29 @@ is still disabled in Supabase or its Client ID/Secret has not been saved.
 
 Never put the Google Client Secret or Supabase service-role key in the app, GitHub, or Vercel public variables.
 
+The app cannot enable this provider by itself. The screenshot error
+`Unsupported provider: provider is not enabled` is fixed only by completing
+steps 1–6 above in this exact Supabase project.
+
 ## Email and password accounts
 
 Keep Supabase Authentication > Providers > Email enabled. Users can create an
 account with email/password, confirm their email when confirmation is enabled,
 and then choose their unique ZION username on the profile screen.
+
+If a guest is already signed in, open **Profile → Settings → Switch account ·
+Email & password** to reveal the account login/create screen. **Logout** also
+returns to that screen. The welcome hug animation opens automatically when the
+home page first loads.
+
+## Optional: delete every existing account and start fresh
+
+`RESET_ALL_ZION_USERS.sql` is deliberately separate from the normal setup.
+Open it, read the warning, change `confirm_complete_reset` from `false` to
+`true`, and run it once in Supabase SQL Editor. This permanently deletes every
+Google, email/password and guest account plus ZION profiles, chats, friends,
+calls and uploaded media. Run `SUPABASE_FINAL_SQL.sql` first if the database
+schema has not yet been installed.
 
 ## Browser audio-call limitation
 

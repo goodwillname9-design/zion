@@ -928,6 +928,12 @@ function FriendsPanel({
     });
     if (error) alert(error.message);
   };
+  const switchGuestToAccountLogin = async () => {
+    if (!supabase) return;
+    localStorage.setItem("zion-guest-created", "true");
+    await supabase.auth.signOut();
+    onClose();
+  };
   if (selected)
     return (
       <FriendChat
@@ -1086,6 +1092,12 @@ function FriendsPanel({
                 onClick={() => void switchGuestToGoogle()}
               >
                 <LogIn /> Continue with Gmail
+              </button>
+              <button
+                className="account-switch-button"
+                onClick={() => void switchGuestToAccountLogin()}
+              >
+                <UserRound /> Switch account · Email & password
               </button>
             </>
           ) : (

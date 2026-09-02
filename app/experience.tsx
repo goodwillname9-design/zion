@@ -54,7 +54,7 @@ export function Experience({
   onOpenFriends?: () => void;
 }) {
   const [stage, setStage] = useState<Stage>("welcome");
-  const [showZionIntro, setShowZionIntro] = useState(false);
+  const [showZionIntro, setShowZionIntro] = useState(true);
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [userId, setUserId] = useState("");
   const [partnerId, setPartnerId] = useState("");
