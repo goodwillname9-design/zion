@@ -85,6 +85,16 @@ const avatars = ["👨🏽", "👨🏻‍🦱", "👨🏿‍🦲", "🧔🏼", "
 const streakBadge = (count: number) =>
   count >= 360 ? "🖤💛❤️" : count >= 30 ? "❤️" : count >= 10 ? "💛" : "🖤";
 const DEVICE_ACCOUNTS_KEY = "zion-device-usernames";
+const withTimeout = <T,>(promise: PromiseLike<T>, milliseconds: number) =>
+  Promise.race<T>([
+    Promise.resolve(promise),
+    new Promise<T>((_, reject) =>
+      window.setTimeout(
+        () => reject(new Error("ZION connection timed out. Please try again.")),
+        milliseconds,
+      ),
+    ),
+  ]);
 const deviceAccounts = () => {
   if (typeof window === "undefined") return [] as string[];
   try {
@@ -210,19 +220,37 @@ export function SocialShell() {
       return;
     }
     setEncryptionState("checking");
-    const { data } = await supabase
-      .from("profiles")
-      .select(
-        "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,profile_edit_used,is_admin",
-      )
-      .eq("id", nextUser.id)
-      .maybeSingle();
-    setProfile((data as ZionProfile | null) ?? null);
-    if (data?.username) rememberDeviceAccount(data.username);
-    setEncryptionState(
-      (await hasLocalE2EEIdentity(nextUser.id)) ? "ready" : "locked",
-    );
-    setLoading(false);
+    try {
+      const { data, error: profileError } = await withTimeout(
+        supabase
+          .from("profiles")
+          .select(
+            "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,profile_edit_used,is_admin",
+          )
+          .eq("id", nextUser.id)
+          .maybeSingle(),
+        10_000,
+      );
+      if (profileError) throw profileError;
+      setProfile((data as ZionProfile | null) ?? null);
+      if (data?.username) rememberDeviceAccount(data.username);
+      const localIdentity = await withTimeout(
+        hasLocalE2EEIdentity(nextUser.id),
+        4_000,
+      ).catch(() => false);
+      setEncryptionState(localIdentity ? "ready" : "locked");
+    } catch (problem) {
+      setError(
+        problem instanceof Error
+          ? problem.message
+          : "ZION could not connect. Please try again.",
+      );
+      setUser(null);
+      setProfile(null);
+      setEncryptionState("idle");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -236,7 +264,17 @@ export function SocialShell() {
       setLoading(false);
       return;
     }
-    void supabase.auth.getUser().then(({ data }) => loadProfile(data.user));
+    void withTimeout(supabase.auth.getSession(), 8_000)
+      .then(({ data }) => loadProfile(data.session?.user ?? null))
+      .catch((problem) => {
+        setError(
+          problem instanceof Error
+            ? problem.message
+            : "ZION could not connect. Please refresh and try again.",
+        );
+        setLoading(false);
+        setEncryptionState("idle");
+      });
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, session) => void loadProfile(session?.user ?? null),
     );
