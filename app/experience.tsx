@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Bell,
+  Clapperboard,
   Globe2,
   Heart,
   MessageCircle,
@@ -57,6 +58,7 @@ export function Experience({
   onOpenFriends,
   onOpenNotifications,
   onOpenCommunities,
+  onOpenReels,
   onOpenProfile,
   notificationCount = 0,
   onOpenAccountManager,
@@ -65,6 +67,7 @@ export function Experience({
   onOpenFriends?: () => void;
   onOpenNotifications?: () => void;
   onOpenCommunities?: () => void;
+  onOpenReels?: () => void;
   onOpenProfile?: () => void;
   notificationCount?: number;
   onOpenAccountManager?: () => void;
@@ -572,6 +575,9 @@ export function Experience({
           <button className="friends-nav community-nav" type="button" onClick={onOpenCommunities}>
             <Globe2 size={16} />
             <b>Communities</b>
+          </button>
+          <button className="friends-nav reels-nav" type="button" onClick={onOpenReels}>
+            <Clapperboard size={16} /><b>Reels</b>
           </button>
           <button
             className="friends-nav notification-nav"

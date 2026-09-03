@@ -889,27 +889,123 @@ create table if not exists public.friend_games (
   updated_at timestamptz not null default now(),
   check(inviter_id<>opponent_id)
 );
+alter table public.friend_games add column if not exists participant_ids uuid[] not null default '{}'::uuid[];
+alter table public.friend_games add column if not exists accepted_ids uuid[] not null default '{}'::uuid[];
+update public.friend_games set
+  participant_ids=array[inviter_id,opponent_id],
+  accepted_ids=case when status='pending' then array[inviter_id] else array[inviter_id,opponent_id] end
+where cardinality(participant_ids)=0;
+alter table public.friend_games drop constraint if exists friend_games_player_count;
+alter table public.friend_games add constraint friend_games_player_count check(cardinality(participant_ids) between 2 and 4);
 create index if not exists friend_games_players_idx
 on public.friend_games(inviter_id,opponent_id,updated_at desc);
 alter table public.friend_games enable row level security;
 drop policy if exists "Game players view games" on public.friend_games;
 create policy "Game players view games" on public.friend_games for select to authenticated
-using(auth.uid()=inviter_id or auth.uid()=opponent_id);
+using(auth.uid()=any(participant_ids));
 drop policy if exists "Friends invite games" on public.friend_games;
 create policy "Friends invite games" on public.friend_games for insert to authenticated
 with check(
   inviter_id=auth.uid()
-  and public.is_friendship_member(friendship_id,auth.uid())
-  and exists(
-    select 1 from public.friendships f where f.id=friendship_id and f.status='accepted'
-      and ((f.requester_id=inviter_id and f.addressee_id=opponent_id)
-        or (f.addressee_id=inviter_id and f.requester_id=opponent_id))
+  and participant_ids[1]=auth.uid()
+  and cardinality(participant_ids) between 2 and 4
+  and accepted_ids=array[auth.uid()]::uuid[]
+  and not exists(
+    select 1 from unnest(participant_ids[2:cardinality(participant_ids)]) invited(id)
+    where not exists(select 1 from public.friendships f where f.status='accepted'
+      and ((f.requester_id=auth.uid() and f.addressee_id=invited.id)
+        or (f.addressee_id=auth.uid() and f.requester_id=invited.id)))
   )
 );
 drop policy if exists "Game players update games" on public.friend_games;
 create policy "Game players update games" on public.friend_games for update to authenticated
-using(auth.uid()=inviter_id or auth.uid()=opponent_id)
-with check(auth.uid()=inviter_id or auth.uid()=opponent_id);
+using(auth.uid()=any(participant_ids))
+with check(auth.uid()=any(participant_ids));
+
+create or replace function public.respond_zion_game(p_game_id uuid,p_accept boolean)
+returns setof public.friend_games language plpgsql security definer set search_path='' as $$
+declare g public.friend_games; next_accepted uuid[];
+begin
+  select * into g from public.friend_games where id=p_game_id for update;
+  if g.id is null or not (auth.uid()=any(g.participant_ids)) or g.status<>'pending' then raise exception 'Game invitation is unavailable'; end if;
+  if p_accept then
+    next_accepted=array(select distinct x from unnest(g.accepted_ids||auth.uid()) x);
+    update public.friend_games set accepted_ids=next_accepted,
+      status=case when g.participant_ids <@ next_accepted then 'active' else 'pending' end
+    where id=p_game_id returning * into g;
+  else
+    update public.friend_games set status='declined' where id=p_game_id returning * into g;
+  end if;
+  return next g;
+end; $$;
+revoke all on function public.respond_zion_game(uuid,boolean) from public;
+grant execute on function public.respond_zion_game(uuid,boolean) to authenticated;
+
+-- Public entertainment feed with likes, comments and owner notifications.
+create table if not exists public.zion_reels (
+  id uuid primary key default gen_random_uuid(), owner_id uuid not null references auth.users(id) on delete cascade,
+  video_path text not null, caption text not null default '', created_at timestamptz not null default now()
+);
+create table if not exists public.zion_reel_likes (
+  reel_id uuid not null references public.zion_reels(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade, created_at timestamptz not null default now(), primary key(reel_id,user_id)
+);
+create table if not exists public.zion_reel_comments (
+  id bigint generated always as identity primary key, reel_id uuid not null references public.zion_reels(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade, body text not null check(char_length(body) between 1 and 1000), created_at timestamptz not null default now()
+);
+create table if not exists public.zion_notifications (
+  id bigint generated always as identity primary key, recipient_id uuid not null references auth.users(id) on delete cascade,
+  actor_id uuid not null references auth.users(id) on delete cascade, kind text not null check(kind in ('reel_like','reel_comment')),
+  reel_id uuid references public.zion_reels(id) on delete cascade, created_at timestamptz not null default now(), read_at timestamptz
+);
+alter table public.zion_notifications drop constraint if exists zion_notifications_kind_check;
+alter table public.zion_notifications add constraint zion_notifications_kind_check check(kind in ('reel_like','reel_comment','profile_follow'));
+alter table public.zion_reels enable row level security; alter table public.zion_reel_likes enable row level security;
+alter table public.zion_reel_comments enable row level security; alter table public.zion_notifications enable row level security;
+drop policy if exists "View reels" on public.zion_reels; create policy "View reels" on public.zion_reels for select to authenticated using(true);
+drop policy if exists "Post reels" on public.zion_reels; create policy "Post reels" on public.zion_reels for insert to authenticated with check(owner_id=auth.uid());
+drop policy if exists "Delete own reels" on public.zion_reels; create policy "Delete own reels" on public.zion_reels for delete to authenticated using(owner_id=auth.uid());
+drop policy if exists "View reel likes" on public.zion_reel_likes; create policy "View reel likes" on public.zion_reel_likes for select to authenticated using(true);
+drop policy if exists "Like reels" on public.zion_reel_likes; create policy "Like reels" on public.zion_reel_likes for insert to authenticated with check(user_id=auth.uid());
+drop policy if exists "Unlike reels" on public.zion_reel_likes; create policy "Unlike reels" on public.zion_reel_likes for delete to authenticated using(user_id=auth.uid());
+drop policy if exists "View reel comments" on public.zion_reel_comments; create policy "View reel comments" on public.zion_reel_comments for select to authenticated using(true);
+drop policy if exists "Comment on reels" on public.zion_reel_comments; create policy "Comment on reels" on public.zion_reel_comments for insert to authenticated with check(user_id=auth.uid());
+drop policy if exists "Read own notifications" on public.zion_notifications; create policy "Read own notifications" on public.zion_notifications for select to authenticated using(recipient_id=auth.uid());
+drop policy if exists "Update own notifications" on public.zion_notifications; create policy "Update own notifications" on public.zion_notifications for update to authenticated using(recipient_id=auth.uid()) with check(recipient_id=auth.uid());
+create or replace function public.notify_reel_activity() returns trigger language plpgsql security definer set search_path='' as $$
+declare owner uuid; activity text;
+begin select owner_id into owner from public.zion_reels where id=new.reel_id; if owner=new.user_id then return new; end if;
+activity=case when tg_table_name='zion_reel_likes' then 'reel_like' else 'reel_comment' end;
+insert into public.zion_notifications(recipient_id,actor_id,kind,reel_id) values(owner,new.user_id,activity,new.reel_id); return new; end; $$;
+drop trigger if exists notify_reel_like on public.zion_reel_likes; create trigger notify_reel_like after insert on public.zion_reel_likes for each row execute function public.notify_reel_activity();
+drop trigger if exists notify_reel_comment on public.zion_reel_comments; create trigger notify_reel_comment after insert on public.zion_reel_comments for each row execute function public.notify_reel_activity();
+create or replace function public.notify_profile_follow() returns trigger language plpgsql security definer set search_path='' as $$
+begin insert into public.zion_notifications(recipient_id,actor_id,kind) values(new.following_id,new.follower_id,'profile_follow'); return new; end; $$;
+drop trigger if exists notify_profile_follow on public.profile_follows; create trigger notify_profile_follow after insert on public.profile_follows for each row execute function public.notify_profile_follow();
+
+create table if not exists public.zion_stories (
+ id uuid primary key default gen_random_uuid(), owner_id uuid not null references auth.users(id) on delete cascade,
+ media_path text not null, media_type text not null check(media_type in ('image','video')), caption text not null default '',
+ created_at timestamptz not null default now(), expires_at timestamptz not null default(now()+interval '24 hours')
+);
+alter table public.zion_stories enable row level security;
+drop policy if exists "View active stories" on public.zion_stories; create policy "View active stories" on public.zion_stories for select to authenticated using(expires_at>now());
+drop policy if exists "Post stories" on public.zion_stories; create policy "Post stories" on public.zion_stories for insert to authenticated with check(owner_id=auth.uid() and expires_at<=now()+interval '24 hours 5 minutes');
+drop policy if exists "Delete own stories" on public.zion_stories; create policy "Delete own stories" on public.zion_stories for delete to authenticated using(owner_id=auth.uid());
+drop policy if exists "Users upload reel and story media" on storage.objects;
+create policy "Users upload reel and story media" on storage.objects for insert to authenticated with check(
+  bucket_id='chat-media' and (storage.foldername(name))[1] in ('reels','stories') and (storage.foldername(name))[2]=auth.uid()::text
+);
+drop policy if exists "Signed users view reel and story media" on storage.objects;
+create policy "Signed users view reel and story media" on storage.objects for select to authenticated using(
+  bucket_id='chat-media' and (storage.foldername(name))[1] in ('reels','stories')
+);
+do $$ begin
+  if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='zion_reels') then alter publication supabase_realtime add table public.zion_reels; end if;
+  if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='zion_reel_likes') then alter publication supabase_realtime add table public.zion_reel_likes; end if;
+  if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='zion_notifications') then alter publication supabase_realtime add table public.zion_notifications; end if;
+end $$;
 
 create or replace function public.set_friend_game_updated_at()
 returns trigger language plpgsql set search_path='' as $$

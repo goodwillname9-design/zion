@@ -35,3 +35,10 @@ Create a new GitHub repository, commit this folder, and push it. Import that rep
 The connected version supports anonymous sign-in, random matching, protected answer reveal, realtime messages, a ten-minute timer, Next Human, block, and report.
 
 Before a large public launch, add automated moderation, rate limiting, admin review tools, legal/privacy pages, and professional safety testing.
+# Latest social upgrade
+
+- Notification Center now includes direct Accept/Decline game invitations; Accept opens the game immediately.
+- Ludo supports 2–4 invited players, dotted animated dice, safe cells, captures, exact finish and bonus turns.
+- ZION Reels provides a worldwide vertical video feed with upload, like, comment, share, creator profile, follow and friend request actions.
+- ZION Stories supports photo/video posts that expire after 24 hours.
+- Reel likes/comments and new followers appear in the owner’s notification bar.

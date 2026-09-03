@@ -56,6 +56,7 @@ import { Experience, type ZionProfile } from "./experience";
 import { countryLabel, countryOptions } from "./countries";
 import { uploadResumable } from "@/lib/resumable-upload";
 import { FriendGames } from "./friend-games";
+import { ZionReels } from "./zion-reels";
 
 type Friendship = {
   id: string;
@@ -67,6 +68,17 @@ type Friendship = {
   streak_count: number;
   last_streak_date: string | null;
 };
+type GameInvite = {
+  id: string;
+  friendship_id: string;
+  inviter_id: string;
+  opponent_id: string;
+  game_type: "ludo" | "chess" | "tic_tac_toe";
+  status: "pending" | "active" | "declined" | "finished";
+  participant_ids: string[];
+  accepted_ids: string[];
+};
+type ActivityNotice = { id:number; actor_id:string; kind:"reel_like"|"reel_comment"|"profile_follow"; reel_id:string|null; created_at:string; read_at:string|null };
 type FriendMessage = {
   id: number;
   friendship_id: string;
@@ -213,6 +225,7 @@ export function SocialShell() {
   const [friendsOpen, setFriendsOpen] = useState(false);
   const [friendsInitialTab, setFriendsInitialTab] = useState<"friends" | "notifications" | "profile" | "communities">("friends");
   const [accountManagerOpen, setAccountManagerOpen] = useState(false);
+  const [reelsOpen, setReelsOpen] = useState(false);
   const [error, setError] = useState("");
   const [notificationPrompt, setNotificationPrompt] = useState(false);
   const [notificationToast, setNotificationToast] = useState("");
@@ -326,12 +339,12 @@ export function SocialShell() {
     if (!supabase || !user || !profile) return;
     const client = supabase;
     const refreshNotificationCount = async () => {
-      const { count } = await client
-        .from("friendships")
-        .select("id", { count: "exact", head: true })
-        .eq("addressee_id", user.id)
-        .eq("status", "pending");
-      setNotificationCount(count ?? 0);
+      const [friendRequests, gameInvites, activities] = await Promise.all([
+        client.from("friendships").select("id", { count: "exact", head: true }).eq("addressee_id", user.id).eq("status", "pending"),
+        client.from("friend_games").select("id", { count: "exact", head: true }).contains("participant_ids", [user.id]).not("accepted_ids", "cs", `{${user.id}}`).eq("status", "pending"),
+        client.from("zion_notifications").select("id", { count: "exact", head: true }).eq("recipient_id", user.id).is("read_at", null),
+      ]);
+      setNotificationCount((friendRequests.count ?? 0) + (gameInvites.count ?? 0) + (activities.count ?? 0));
     };
     void refreshNotificationCount();
     const channel = client
@@ -370,6 +383,40 @@ export function SocialShell() {
           }
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "friend_games",
+        },
+        async (payload) => {
+          void refreshNotificationCount();
+          const row = payload.new as { id?: string; inviter_id?: string; game_type?: GameInvite["game_type"]; status?: string };
+          const gameRow = payload.new as unknown as GameInvite;
+          if (payload.eventType !== "INSERT" || row.status !== "pending" || !row.inviter_id || !gameRow.participant_ids?.includes(user.id)) return;
+          const { data: sender } = await client.from("profiles").select("username,avatar").eq("id", row.inviter_id).maybeSingle();
+          const name = sender?.username ?? "A ZION friend";
+          const gameName = row.game_type === "tic_tac_toe" ? "Tic-Tac-Toe" : row.game_type === "chess" ? "Chess" : "Ludo";
+          setNotificationToast(`${sender?.avatar ?? "🎮"} ${name} invited you to ${gameName}`);
+          window.setTimeout(() => setNotificationToast(""), 6000);
+          if (Notification.permission === "granted") {
+            const registration = await navigator.serviceWorker?.ready;
+            await registration?.showNotification("New ZION game invitation", {
+              body: `${name} invited you to ${gameName}.`, icon: "/icons/zion-192.png", badge: "/icons/zion-192.png",
+              tag: `game-${row.id ?? row.inviter_id}`, data: { url: "/" },
+            });
+          }
+        },
+      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "zion_notifications", filter: `recipient_id=eq.${user.id}` }, async (payload) => {
+        void refreshNotificationCount();
+        if(payload.eventType!=="INSERT")return;
+        const row=payload.new as {actor_id?:string;kind?:string}; if(!row.actor_id)return;
+        const {data:actor}=await client.from("profiles").select("username,avatar").eq("id",row.actor_id).maybeSingle();
+        const action=row.kind==="reel_comment"?"commented on your reel":row.kind==="profile_follow"?"started following you":"liked your reel";
+        setNotificationToast(`${actor?.avatar??"❤️"} ${actor?.username??"A ZION user"} ${action}`);
+      })
       .subscribe();
     return () => {
       void client.removeChannel(channel);
@@ -428,6 +475,7 @@ export function SocialShell() {
           setFriendsInitialTab("communities");
           setFriendsOpen(true);
         }}
+        onOpenReels={() => setReelsOpen(true)}
         onOpenProfile={() => {
           setFriendsInitialTab("profile");
           setFriendsOpen(true);
@@ -450,6 +498,7 @@ export function SocialShell() {
           onClose={() => setAccountManagerOpen(false)}
         />
       ) : null}
+      {reelsOpen ? <ZionReels user={user} onClose={() => setReelsOpen(false)} /> : null}
       {notificationToast ? (
         <button
           className="notification-toast"
@@ -1037,6 +1086,9 @@ function FriendsPanel({
   onClose: () => void;
 }) {
   const [friendships, setFriendships] = useState<Friendship[]>([]);
+  const [gameInvites, setGameInvites] = useState<GameInvite[]>([]);
+  const [activityNotices, setActivityNotices] = useState<ActivityNotice[]>([]);
+  const [gameToOpen, setGameToOpen] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<Record<string, ZionProfile>>({});
   const [pins, setPins] = useState<string[]>([]);
   const [selected, setSelected] = useState<Friendship | null>(null);
@@ -1066,7 +1118,7 @@ function FriendsPanel({
   const [socialCounts, setSocialCounts] = useState({ followers: 0, following: 0 });
   const load = useCallback(async () => {
     if (!supabase) return;
-    const [{ data: rows }, { data: pinRows }, { data: privacy }, { data: followingRows }, followerCount, followingCount] =
+    const [{ data: rows }, { data: pinRows }, { data: privacy }, { data: followingRows }, followerCount, followingCount, { data: inviteRows }, { data: activityRows }] =
       await Promise.all([
         supabase
           .from("friendships")
@@ -1083,12 +1135,16 @@ function FriendsPanel({
         supabase.from("profile_follows").select("following_id").eq("follower_id", user.id),
         supabase.from("profile_follows").select("follower_id", { count: "exact", head: true }).eq("following_id", user.id),
         supabase.from("profile_follows").select("following_id", { count: "exact", head: true }).eq("follower_id", user.id),
+        supabase.from("friend_games").select("id,friendship_id,inviter_id,opponent_id,game_type,status,participant_ids,accepted_ids").contains("participant_ids", [user.id]).not("accepted_ids", "cs", `{${user.id}}`).eq("status", "pending").order("created_at", { ascending: false }),
+        supabase.from("zion_notifications").select("id,actor_id,kind,reel_id,created_at,read_at").eq("recipient_id",user.id).order("created_at",{ascending:false}).limit(50),
       ]);
     const list = (rows as Friendship[] | null) ?? [];
     setFriendships(list);
     setPins((pinRows ?? []).map((item) => item.friend_id));
     setFollowingIds((followingRows ?? []).map((item) => item.following_id));
     setSocialCounts({ followers: followerCount.count ?? 0, following: followingCount.count ?? 0 });
+    setGameInvites((inviteRows as GameInvite[] | null) ?? []);
+    const activities=(activityRows as ActivityNotice[]|null)??[]; setActivityNotices(activities);
     if (privacy) {
       setAllowCalls(privacy.allow_audio_calls);
       setShowCountry(privacy.show_country);
@@ -1096,8 +1152,7 @@ function FriendsPanel({
     }
     const ids = [
       ...new Set(
-        list
-          .flatMap((item) => [item.requester_id, item.addressee_id])
+        [...list.flatMap((item) => [item.requester_id, item.addressee_id]), ...activities.map((item)=>item.actor_id)]
           .filter((id) => id !== user.id),
       ),
     ];
@@ -1131,6 +1186,7 @@ function FriendsPanel({
         { event: "*", schema: "public", table: "friendships" },
         refresh,
       )
+      .on("postgres_changes", { event: "*", schema: "public", table: "friend_games" }, refresh)
       .subscribe();
     return () => {
       window.clearTimeout(initial);
@@ -1138,6 +1194,7 @@ function FriendsPanel({
       void client.removeChannel(channel);
     };
   }, [load, user.id]);
+  useEffect(()=>{if(activeTab!=="notifications"||!supabase||!activityNotices.some(x=>!x.read_at))return; const timer=window.setTimeout(()=>{void supabase!.from("zion_notifications").update({read_at:new Date().toISOString()}).eq("recipient_id",user.id).is("read_at",null);},1200); return()=>window.clearTimeout(timer);},[activeTab,activityNotices,user.id]);
   const otherId = useCallback(
     (item: Friendship) =>
       item.requester_id === user.id ? item.addressee_id : item.requester_id,
@@ -1157,6 +1214,16 @@ function FriendsPanel({
       .from("friendships")
       .update({ status: "declined" })
       .eq("id", item.id);
+    await load();
+  };
+  const respondToGameInvite = async (game: GameInvite, acceptInvite: boolean) => {
+    if (!supabase) return;
+    const { error } = await supabase.rpc("respond_zion_game", { p_game_id: game.id, p_accept: acceptInvite });
+    if (error) return alert(error.message);
+    if (acceptInvite) {
+      setGameToOpen(game.id);
+      setActiveTab("games");
+    }
     await load();
   };
   const togglePin = async (friendId: string) => {
@@ -1563,6 +1630,8 @@ function FriendsPanel({
         ) : activeTab === "games" ? (
           <FriendGames
             user={user}
+            initialGameId={gameToOpen}
+            onInitialGameOpened={() => setGameToOpen(null)}
             friends={accepted
               .map((item) => ({
                 friendshipId: item.id,
@@ -1583,8 +1652,20 @@ function FriendsPanel({
             <h2>
               <Bell /> Notification Center
             </h2>
-            {pendingRequests.length ? (
-              pendingRequests.map((item) => {
+            {gameInvites.map((game) => {
+              const person = profiles[game.inviter_id];
+              const gameName = game.game_type === "tic_tac_toe" ? "Tic-Tac-Toe" : game.game_type === "chess" ? "Chess" : "Ludo";
+              return (
+                <div className="notification-request game-invite-notification" key={game.id}>
+                  <span className="notification-game-icon">{game.game_type === "ludo" ? "🎲" : game.game_type === "chess" ? "♛" : "✕○"}</span>
+                  <div><b>{person?.username ?? "ZION friend"}</b><small>invited you to {gameName}</small></div>
+                  <button className="request-decline" onClick={() => void respondToGameInvite(game, false)}>Decline</button>
+                  <button className="request-accept" onClick={() => void respondToGameInvite(game, true)}>Accept &amp; Play</button>
+                </div>
+              );
+            })}
+            {activityNotices.map((notice)=>{const actor=profiles[notice.actor_id]; const action=notice.kind==="reel_comment"?"commented on your reel":notice.kind==="profile_follow"?"started following you":"liked your reel"; return <div className={`notification-request activity-notice ${notice.read_at?"":"unread"}`} key={`activity-${notice.id}`}><ProfileAvatar profile={actor}/><div><b>{actor?.username??"ZION user"}</b><small>{action}</small></div><span>{notice.kind==="reel_comment"?"💬":notice.kind==="profile_follow"?"➕":"❤️"}</span></div>;})}
+            {pendingRequests.map((item) => {
                 const person = profiles[otherId(item)];
                 return (
                   <div className="notification-request" key={item.id}>
@@ -1607,13 +1688,13 @@ function FriendsPanel({
                     </button>
                   </div>
                 );
-              })
-            ) : (
+              })}
+            {!pendingRequests.length && !gameInvites.length && !activityNotices.length ? (
               <div className="empty-friends">
                 <Bell />
-                <p>No new friend requests.</p>
+                <p>No new notifications.</p>
               </div>
-            )}
+            ) : null}
           </div>
         ) : activeTab === "profile" ? (
           <ProfileDetails
