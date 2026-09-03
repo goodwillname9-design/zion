@@ -853,3 +853,74 @@ begin
     end if;
   end loop;
 end $$;
+
+-- Friend last-seen heartbeat. Users can update only their own timestamp.
+alter table public.profiles
+add column if not exists last_seen_at timestamptz not null default now();
+
+create or replace function public.touch_zion_last_seen()
+returns timestamptz
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare touched_at timestamptz := now();
+begin
+  if auth.uid() is null then raise exception 'Authentication required'; end if;
+  update public.profiles set last_seen_at=touched_at where id=auth.uid();
+  return touched_at;
+end;
+$$;
+revoke all on function public.touch_zion_last_seen() from public;
+grant execute on function public.touch_zion_last_seen() to authenticated;
+
+-- Persistent friends-only realtime games.
+create table if not exists public.friend_games (
+  id uuid primary key default gen_random_uuid(),
+  friendship_id uuid not null references public.friendships(id) on delete cascade,
+  inviter_id uuid not null references auth.users(id) on delete cascade,
+  opponent_id uuid not null references auth.users(id) on delete cascade,
+  game_type text not null check(game_type in ('ludo','chess','tic_tac_toe')),
+  status text not null default 'pending' check(status in ('pending','active','declined','finished')),
+  state jsonb not null default '{}'::jsonb,
+  current_turn uuid references auth.users(id) on delete set null,
+  winner_id uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check(inviter_id<>opponent_id)
+);
+create index if not exists friend_games_players_idx
+on public.friend_games(inviter_id,opponent_id,updated_at desc);
+alter table public.friend_games enable row level security;
+drop policy if exists "Game players view games" on public.friend_games;
+create policy "Game players view games" on public.friend_games for select to authenticated
+using(auth.uid()=inviter_id or auth.uid()=opponent_id);
+drop policy if exists "Friends invite games" on public.friend_games;
+create policy "Friends invite games" on public.friend_games for insert to authenticated
+with check(
+  inviter_id=auth.uid()
+  and public.is_friendship_member(friendship_id,auth.uid())
+  and exists(
+    select 1 from public.friendships f where f.id=friendship_id and f.status='accepted'
+      and ((f.requester_id=inviter_id and f.addressee_id=opponent_id)
+        or (f.addressee_id=inviter_id and f.requester_id=opponent_id))
+  )
+);
+drop policy if exists "Game players update games" on public.friend_games;
+create policy "Game players update games" on public.friend_games for update to authenticated
+using(auth.uid()=inviter_id or auth.uid()=opponent_id)
+with check(auth.uid()=inviter_id or auth.uid()=opponent_id);
+
+create or replace function public.set_friend_game_updated_at()
+returns trigger language plpgsql set search_path='' as $$
+begin new.updated_at=now(); return new; end;
+$$;
+drop trigger if exists friend_game_updated_at on public.friend_games;
+create trigger friend_game_updated_at before update on public.friend_games
+for each row execute function public.set_friend_game_updated_at();
+
+do $$ begin
+  if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='friend_games') then
+    alter publication supabase_realtime add table public.friend_games;
+  end if;
+end $$;

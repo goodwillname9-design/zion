@@ -136,15 +136,89 @@ const arabic: Record<string, string> = {
   "ZION connection timed out. Please try again.": "انتهت مهلة اتصال ZION. حاول مرة أخرى.",
   "Connection failed.": "فشل الاتصال.",
   "Please wait": "يرجى الانتظار",
+  "Games": "الألعاب",
+  "Play with Friends": "العب مع الأصدقاء",
+  "Send game invitation": "إرسال دعوة للعبة",
+  "Your turn": "دورك",
+  "Friend’s turn": "دور صديقك",
+  "Game finished": "انتهت اللعبة",
+  "You won!": "لقد فزت!",
+  "Recent games": "الألعاب الأخيرة",
+  "Choose friend": "اختر صديقاً",
+  "Play": "العب",
+  "Last seen private": "آخر ظهور خاص",
+  "Last seen just now": "آخر ظهور الآن",
+};
+
+const hindi: Record<string, string> = {
+  "Opening ZION…": "ZION खुल रहा है…", Friends: "दोस्त", Notifications: "सूचनाएँ",
+  Communities: "समुदाय", Meetings: "मीटिंग", Games: "गेम्स", "My Profile": "मेरी प्रोफ़ाइल",
+  "My ZION Profile": "मेरी ZION प्रोफ़ाइल", "Find Friends": "दोस्त खोजें",
+  "Profile & Settings": "प्रोफ़ाइल और सेटिंग्स", "Profile and settings": "प्रोफ़ाइल और सेटिंग्स",
+  "Add or switch account": "अकाउंट जोड़ें या बदलें", "Add another account": "दूसरा अकाउंट जोड़ें",
+  "Switch account": "अकाउंट बदलें", "Log out of ZION": "ZION से लॉग आउट करें",
+  "Log in": "लॉग इन", "Create account": "अकाउंट बनाएँ", "Log in to ZION": "ZION में लॉग इन करें",
+  "Create ZION account": "ZION अकाउंट बनाएँ", "Unique username · any language": "विशिष्ट यूज़रनेम · कोई भी भाषा",
+  "Password · minimum 6 characters": "पासवर्ड · कम से कम 6 अक्षर", "Please wait…": "कृपया प्रतीक्षा करें…",
+  "Enter ZION": "ZION में जाएँ", "Welcome to ZION": "ZION में आपका स्वागत है",
+  "Meet kindly. Stay safely.": "अच्छे से मिलें। सुरक्षित रहें।", "Allow notifications": "सूचनाएँ अनुमति दें",
+  "Allow friend request alerts?": "फ्रेंड रिक्वेस्ट अलर्ट की अनुमति दें?", Decline: "अस्वीकार", Allow: "अनुमति दें",
+  "Notification Center": "सूचना केंद्र", "No new friend requests.": "कोई नई फ्रेंड रिक्वेस्ट नहीं।", Accept: "स्वीकार",
+  Alerts: "अलर्ट", "Exact username": "सही यूज़रनेम", "Add Friend": "दोस्त जोड़ें", Requested: "अनुरोध भेजा",
+  Following: "फॉलो कर रहे हैं", Follow: "फॉलो करें", Followers: "फॉलोअर्स", "ZION Profile": "ZION प्रोफ़ाइल",
+  "Friend Profile": "दोस्त की प्रोफ़ाइल", Country: "देश", Gender: "लिंग", "Account created": "अकाउंट बनाया गया",
+  "Online now": "अभी ऑनलाइन", Offline: "ऑफलाइन", "Last seen private": "लास्ट सीन निजी है",
+  "Last seen just now": "अभी देखा गया", "Message your friend…": "अपने दोस्त को संदेश लिखें…",
+  "Message community…": "समुदाय में संदेश लिखें…", Gallery: "गैलरी", "Send message": "संदेश भेजें",
+  "Start your conversation": "बातचीत शुरू करें", "Message deleted": "संदेश हटाया गया", "Edit message": "संदेश बदलें",
+  "Delete this message?": "यह संदेश हटाएँ?", Delete: "हटाएँ", Edit: "बदलें", "Reply or mention": "जवाब या उल्लेख",
+  Photo: "फोटो", Video: "वीडियो", Mute: "म्यूट", Unmute: "अनम्यूट", Speaker: "स्पीकर", "Sound off": "आवाज़ बंद",
+  Camera: "कैमरा", "Camera off": "कैमरा बंद", End: "समाप्त", "End call": "कॉल समाप्त करें", Cancel: "रद्द करें",
+  "Waiting for permission…": "अनुमति की प्रतीक्षा…", "Call declined": "कॉल अस्वीकार हुई", "Typing…": "टाइप कर रहे हैं…",
+  Settings: "सेटिंग्स", Appearance: "दिखावट", "Privacy & Security": "गोपनीयता और सुरक्षा", Dark: "डार्क", Day: "लाइट",
+  "Show country": "देश दिखाएँ", "Online status": "ऑनलाइन स्थिति", "Save settings": "सेटिंग्स सेव करें",
+  "One-time profile edit": "एक बार प्रोफ़ाइल बदलाव", "Save once": "एक बार सेव करें",
+  "Add or change profile photo": "प्रोफ़ाइल फोटो जोड़ें या बदलें", "Create your profile": "अपनी प्रोफ़ाइल बनाएँ",
+  "Unique username": "विशिष्ट यूज़रनेम", Male: "पुरुष", Female: "महिला", Other: "अन्य",
+  "Select your country": "अपना देश चुनें", "Choose from gallery": "गैलरी से चुनें", "Saving profile…": "प्रोफ़ाइल सेव हो रही है…",
+  "Account suspended": "अकाउंट निलंबित", "Admin profiles": "एडमिन प्रोफ़ाइल", Ban: "बैन", Unban: "अनबैन",
+  "Search username": "यूज़रनेम खोजें", "Private group chats": "निजी ग्रुप चैट", "+ Create": "+ बनाएँ",
+  "Community name": "समुदाय का नाम", "Add trusted friends": "विश्वसनीय दोस्त जोड़ें",
+  "Create encrypted community": "एन्क्रिप्टेड समुदाय बनाएँ", "Encrypted community": "एन्क्रिप्टेड समुदाय",
+  "Start this private community conversation.": "यह निजी समुदाय बातचीत शुरू करें।", You: "आप", Member: "सदस्य",
+  "Ready when you are": "आप तैयार तो हम तैयार", "Meet someone": "किसी से मिलें",
+  "Meet a human, not a profile.": "एक इंसान से मिलें, सिर्फ प्रोफ़ाइल से नहीं।", "I confirm I am 18 or older": "मैं पुष्टि करता/करती हूँ कि मेरी उम्र 18 वर्ष या अधिक है",
+  "Finding a thoughtful human…": "एक अच्छे इंसान को खोज रहे हैं…", "Your shared question": "आप दोनों का सवाल",
+  "Your stranger is here": "दूसरा व्यक्ति यहाँ है", "Waiting for your stranger…": "दूसरे व्यक्ति की प्रतीक्षा…",
+  "Write something honest…": "कुछ सच्चा लिखें…", "Share my answer": "मेरा जवाब साझा करें", "Answer shared": "जवाब साझा हुआ",
+  "Skip waiting · Next human": "प्रतीक्षा छोड़ें · अगला व्यक्ति", "Both answers are in": "दोनों जवाब मिल गए",
+  "Start your 10 minutes": "अपने 10 मिनट शुरू करें", "Stranger is in this chat": "दूसरा व्यक्ति चैट में है",
+  "Stranger is reconnecting…": "दूसरा व्यक्ति फिर जुड़ रहा है…", "Write a message…": "संदेश लिखें…", "Next human": "अगला व्यक्ति",
+  "Add friend": "दोस्त जोड़ें", "Send kindness": "प्यार से भेजें", "Block and report this conversation": "इस बातचीत को ब्लॉक और रिपोर्ट करें",
+  "Join meeting": "मीटिंग में शामिल हों", "Create meeting": "मीटिंग बनाएँ", "Meeting ID": "मीटिंग आईडी", Passcode: "पासकोड",
+  "Incorrect username or password.": "यूज़रनेम या पासवर्ड गलत है।", "ZION could not connect. Please try again.": "ZION कनेक्ट नहीं हो सका। फिर कोशिश करें।",
+  "ZION connection timed out. Please try again.": "ZION कनेक्शन का समय समाप्त हुआ। फिर कोशिश करें।", "Connection failed.": "कनेक्शन विफल।",
+  "Please wait": "कृपया प्रतीक्षा करें", "Play with Friends": "दोस्तों के साथ खेलें", "Send game invitation": "गेम आमंत्रण भेजें",
+  "Your turn": "आपकी बारी", "Friend’s turn": "दोस्त की बारी", "Game finished": "गेम समाप्त", "You won!": "आप जीत गए!",
+  "Recent games": "हाल के गेम", "Choose friend": "दोस्त चुनें", Play: "खेलें",
 };
 
 const originalText = new WeakMap<Node, string>();
 const originalAttributes = new WeakMap<Element, Record<string, string>>();
 const attributes = ["placeholder", "title", "aria-label"];
 
-function translated(value: string) {
-  const direct = arabic[value];
+type Language = "en" | "ar" | "hi";
+
+function translated(value: string, language: Language) {
+  const direct = (language === "ar" ? arabic : hindi)[value];
   if (direct) return direct;
+  if (language === "hi")
+    return value
+      .replace(/ sent you a friend request$/, " ने आपको फ्रेंड रिक्वेस्ट भेजी")
+      .replace(/^Replying to /, "जवाब: ")
+      .replace(/^Waiting for /, "प्रतीक्षा: ")
+      .replace(/^Last seen /, "लास्ट सीन ")
+      .replace(/ day streak$/, " दिन की स्ट्रीक");
   return value
     .replace(/ sent you a friend request$/, " أرسل إليك طلب صداقة")
     .replace(/^Replying to /, "الرد على ")
@@ -153,17 +227,23 @@ function translated(value: string) {
     .replace(/^Maximum /, "الحد الأقصى ");
 }
 
-function updateText(node: Node, language: "en" | "ar") {
+function updateText(node: Node, language: Language) {
   const parent = node.parentElement;
   if (!parent || parent.closest("script,style,[data-no-translate]")) return;
   const current = node.nodeValue ?? "";
   const trimmed = current.trim();
   if (!trimmed) return;
-  if (language === "ar") {
+  if (language !== "en") {
     const previous = originalText.get(node);
-    if (!previous || current !== translated(previous)) originalText.set(node, current);
+    if (
+      !previous ||
+      (current !== previous &&
+        current !== translated(previous, "ar") &&
+        current !== translated(previous, "hi"))
+    )
+      originalText.set(node, current);
     const source = originalText.get(node) ?? current;
-    const next = source.replace(source.trim(), translated(source.trim()));
+    const next = source.replace(source.trim(), translated(source.trim(), language));
     if (current !== next) node.nodeValue = next;
   } else {
     const source = originalText.get(node);
@@ -171,22 +251,27 @@ function updateText(node: Node, language: "en" | "ar") {
   }
 }
 
-function updateElement(element: Element, language: "en" | "ar") {
+function updateElement(element: Element, language: Language) {
   if (element.closest("[data-no-translate]")) return;
   const saved = originalAttributes.get(element) ?? {};
   for (const attribute of attributes) {
     const current = element.getAttribute(attribute);
     if (!current) continue;
-    if (language === "ar") {
-      if (!saved[attribute] || current !== translated(saved[attribute]))
+    if (language !== "en") {
+      if (
+        !saved[attribute] ||
+        (current !== saved[attribute] &&
+          current !== translated(saved[attribute], "ar") &&
+          current !== translated(saved[attribute], "hi"))
+      )
         saved[attribute] = current;
-      element.setAttribute(attribute, translated(saved[attribute]));
+      element.setAttribute(attribute, translated(saved[attribute], language));
     } else if (saved[attribute]) element.setAttribute(attribute, saved[attribute]);
   }
   originalAttributes.set(element, saved);
 }
 
-function updateTree(root: Node, language: "en" | "ar") {
+function updateTree(root: Node, language: Language) {
   if (root.nodeType === Node.TEXT_NODE) updateText(root, language);
   if (root instanceof Element) updateElement(root, language);
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
@@ -199,10 +284,11 @@ function updateTree(root: Node, language: "en" | "ar") {
 }
 
 export function LanguageSwitcher() {
-  const [language, setLanguage] = useState<"en" | "ar">("en");
+  const [language, setLanguage] = useState<Language>("en");
 
   useEffect(() => {
-    const saved = localStorage.getItem("zion-language") === "ar" ? "ar" : "en";
+    const stored = localStorage.getItem("zion-language");
+    const saved: Language = stored === "ar" || stored === "hi" ? stored : "en";
     window.setTimeout(() => setLanguage(saved), 0);
   }, []);
 
@@ -231,6 +317,7 @@ export function LanguageSwitcher() {
     <div className="language-switcher" data-no-translate>
       <button className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>English</button>
       <button className={language === "ar" ? "active" : ""} onClick={() => setLanguage("ar")}>العربية</button>
+      <button className={language === "hi" ? "active" : ""} onClick={() => setLanguage("hi")}>हिन्दी</button>
     </div>
   );
 }

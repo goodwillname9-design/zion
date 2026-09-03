@@ -49,18 +49,23 @@ export type ZionProfile = {
   show_online_status?: boolean;
   profile_edit_used?: boolean;
   is_admin?: boolean;
+  last_seen_at?: string;
 };
 
 export function Experience({
   profile,
   onOpenFriends,
   onOpenNotifications,
+  onOpenCommunities,
+  onOpenProfile,
   notificationCount = 0,
   onOpenAccountManager,
 }: {
   profile?: ZionProfile;
   onOpenFriends?: () => void;
   onOpenNotifications?: () => void;
+  onOpenCommunities?: () => void;
+  onOpenProfile?: () => void;
   notificationCount?: number;
   onOpenAccountManager?: () => void;
 }) {
@@ -564,6 +569,10 @@ export function Experience({
             <Users size={16} />
             <b>Friends</b>
           </button>
+          <button className="friends-nav community-nav" type="button" onClick={onOpenCommunities}>
+            <Globe2 size={16} />
+            <b>Communities</b>
+          </button>
           <button
             className="friends-nav notification-nav"
             type="button"
@@ -590,7 +599,7 @@ export function Experience({
                 profileLongPressed.current = false;
                 return;
               }
-              onOpenFriends?.();
+              onOpenProfile?.();
             }}
             aria-label="Open profile. Hold to add or switch account"
           >

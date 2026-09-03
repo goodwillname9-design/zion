@@ -7,6 +7,7 @@ import {
   Bell,
   CalendarDays,
   Camera,
+  Gamepad2,
   ImagePlus,
   Heart,
   LogOut,
@@ -54,6 +55,7 @@ import {
 import { Experience, type ZionProfile } from "./experience";
 import { countryLabel, countryOptions } from "./countries";
 import { uploadResumable } from "@/lib/resumable-upload";
+import { FriendGames } from "./friend-games";
 
 type Friendship = {
   id: string;
@@ -84,6 +86,16 @@ type FriendMessage = {
 const avatars = ["👨🏽", "👨🏻‍🦱", "👨🏿‍🦲", "🧔🏼", "👩🏽", "👩🏻‍🦱", "👩🏿", "👱🏼‍♀️", "🧑🏾", "🧑🏻‍🦰"];
 const streakBadge = (count: number) =>
   count >= 360 ? "🖤💛❤️" : count >= 30 ? "❤️" : count >= 10 ? "💛" : "🖤";
+const lastSeenLabel = (profile?: ZionProfile, online = false) => {
+  if (online) return "Online now";
+  if (!profile?.show_online_status || !profile.last_seen_at) return "Last seen private";
+  const date = new Date(profile.last_seen_at);
+  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (seconds < 90) return "Last seen just now";
+  if (seconds < 3600) return `Last seen ${Math.floor(seconds / 60)} min ago`;
+  if (seconds < 86400) return `Last seen ${Math.floor(seconds / 3600)} hr ago`;
+  return `Last seen ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date)}`;
+};
 const DEVICE_ACCOUNTS_KEY = "zion-device-usernames";
 const withTimeout = <T,>(promise: PromiseLike<T>, milliseconds: number) =>
   Promise.race<T>([
@@ -199,7 +211,7 @@ export function SocialShell() {
   const [profile, setProfile] = useState<ZionProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [friendsOpen, setFriendsOpen] = useState(false);
-  const [friendsInitialTab, setFriendsInitialTab] = useState<"friends" | "notifications">("friends");
+  const [friendsInitialTab, setFriendsInitialTab] = useState<"friends" | "notifications" | "profile" | "communities">("friends");
   const [accountManagerOpen, setAccountManagerOpen] = useState(false);
   const [error, setError] = useState("");
   const [notificationPrompt, setNotificationPrompt] = useState(false);
@@ -227,7 +239,7 @@ export function SocialShell() {
         supabase
           .from("profiles")
           .select(
-            "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,profile_edit_used,is_admin",
+            "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,profile_edit_used,is_admin,last_seen_at",
           )
           .eq("id", nextUser.id)
           .maybeSingle(),
@@ -291,6 +303,23 @@ export function SocialShell() {
       7 * 24 * 60 * 60 * 1000;
     if (Notification.permission === "default" && !declined)
       setNotificationPrompt(true);
+  }, [profile, user]);
+
+  useEffect(() => {
+    if (!supabase || !user || !profile) return;
+    const client = supabase;
+    const touch = () => {
+      if (document.visibilityState === "visible")
+        void client.rpc("touch_zion_last_seen");
+    };
+    touch();
+    const timer = window.setInterval(touch, 45_000);
+    document.addEventListener("visibilitychange", touch);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", touch);
+      void client.rpc("touch_zion_last_seen");
+    };
   }, [profile, user]);
 
   useEffect(() => {
@@ -393,6 +422,14 @@ export function SocialShell() {
         }}
         onOpenNotifications={() => {
           setFriendsInitialTab("notifications");
+          setFriendsOpen(true);
+        }}
+        onOpenCommunities={() => {
+          setFriendsInitialTab("communities");
+          setFriendsOpen(true);
+        }}
+        onOpenProfile={() => {
+          setFriendsInitialTab("profile");
           setFriendsOpen(true);
         }}
         notificationCount={notificationCount}
@@ -995,7 +1032,7 @@ function FriendsPanel({
 }: {
   user: User;
   profile: ZionProfile;
-  initialTab: "friends" | "notifications";
+  initialTab: "friends" | "notifications" | "profile" | "communities";
   onProfileUpdated: (profile: ZionProfile) => void;
   onClose: () => void;
 }) {
@@ -1005,7 +1042,7 @@ function FriendsPanel({
   const [selected, setSelected] = useState<Friendship | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "friends" | "notifications" | "find" | "profile" | "communities" | "admin"
+    "friends" | "notifications" | "find" | "profile" | "communities" | "games" | "admin"
   >(initialTab);
   const [searchName, setSearchName] = useState("");
   const [searching, setSearching] = useState(false);
@@ -1068,7 +1105,7 @@ function FriendsPanel({
       const { data } = await supabase
         .from("profiles")
         .select(
-          "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,is_admin",
+          "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,is_admin,last_seen_at",
         )
         .in("id", ids);
       setProfiles(
@@ -1507,16 +1544,10 @@ function FriendsPanel({
             <Search /> Find Friends
           </button>
           <button
-            className={activeTab === "profile" ? "active" : ""}
-            onClick={() => setActiveTab("profile")}
+            className={activeTab === "games" ? "active game-tab" : "game-tab"}
+            onClick={() => setActiveTab("games")}
           >
-            <UserRound /> My Profile
-          </button>
-          <button
-            className={activeTab === "communities" ? "active" : ""}
-            onClick={() => setActiveTab("communities")}
-          >
-            <Users /> Communities
+            <Gamepad2 /> Games
           </button>
           <button
             className="meeting-tab"
@@ -1529,6 +1560,19 @@ function FriendsPanel({
         </div>
         {activeTab === "admin" ? (
           <AdminPanel user={user} />
+        ) : activeTab === "games" ? (
+          <FriendGames
+            user={user}
+            friends={accepted
+              .map((item) => ({
+                friendshipId: item.id,
+                profile: profiles[otherId(item)],
+              }))
+              .filter(
+                (item): item is { friendshipId: string; profile: ZionProfile } =>
+                  Boolean(item.profile),
+              )}
+          />
         ) : activeTab === "communities" ? (
           <CommunityPanel
             user={user}
@@ -1677,11 +1721,7 @@ function FriendsPanel({
                         <ProfileAvatar profile={person} />
                         <div>
                           <b>{person?.username ?? "ZION friend"}</b>
-                          <small>
-                            {person?.country
-                              ? countryLabel(person.country)
-                              : "Private chat"}
-                          </small>
+                          <small>{lastSeenLabel(person)}</small>
                         </div>
                         <em
                           className={`streak-badge streak-${item.streak_count >= 30 ? "red" : item.streak_count >= 10 ? "yellow" : "black"}`}
@@ -2707,7 +2747,7 @@ function FriendChat({
           <ProfileDetails profile={friend} label="Friend Profile" />
           <div className="profile-status-row">
             <i className={friendOnline ? "online" : "offline"} />
-            <b>{friendOnline ? "Online now" : "Offline"}</b>
+            <b>{lastSeenLabel(friend, friendOnline)}</b>
           </div>
         </section>
       </div>
@@ -2740,7 +2780,7 @@ function FriendChat({
                   ? "Typing…"
                   : friendOnline
                     ? "Online now · Permanent chat"
-                    : "Offline · Permanent chat"}
+                    : `${lastSeenLabel(friend)} · Permanent chat`}
             </small>
           </button>
           {callState !== "idle" ? (

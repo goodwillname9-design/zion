@@ -49,9 +49,23 @@ responsiveness under concurrent use.
 
 Notifications have their own top navigation button and unread request badge,
 separate from Friends. The floating language control switches the complete
-interface between English and Arabic, remembers the choice on that device, and
-enables right-to-left layout for Arabic without calling an external translation
-service. A recovery screen allows retrying after an unexpected client error.
+interface between English, Arabic and Hindi, remembers the choice on that
+device, and enables right-to-left layout for Arabic without calling an external
+translation service. Profile, Notifications and Communities are available from
+the main top navigation instead of being hidden inside Friends. A recovery
+screen allows retrying after an unexpected client error.
+
+## Last seen and friends-only games
+
+The latest SQL adds `profiles.last_seen_at`, a secure heartbeat function, and
+the private `friend_games` table. Friends can see a privacy-aware last-seen
+label. Users who disable Online status show **Last seen private**.
+
+Accepted friends can invite each other to realtime Ludo, Chess and
+Tic-Tac-Toe. The other person must accept before a game starts. Game rows are
+protected by RLS so only the two players can view or update that session. Run
+the complete latest SQL before deploying the code; it also adds `friend_games`
+to Supabase Realtime.
 
 The login username is permanent for regular accounts. Country can be changed once
 from Profile Settings. The ZION owner account can change its displayed username
