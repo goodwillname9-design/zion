@@ -39,6 +39,20 @@ through Vercel request bodies. Actual capacity and transfer speed still depend
 on the Supabase project plan, storage quota, device memory and network. Share
 only videos/content you own or have permission to distribute.
 
+## Realtime, notifications and languages
+
+Run the latest SQL so `messages`, `conversation_answers`, `conversations`,
+`friend_messages`, and `community_messages` are enabled in Supabase Realtime.
+The app now listens for database changes instead of repeatedly downloading chat
+and friend data. This substantially reduces duplicate traffic and improves
+responsiveness under concurrent use.
+
+Notifications have their own top navigation button and unread request badge,
+separate from Friends. The floating language control switches the complete
+interface between English and Arabic, remembers the choice on that device, and
+enables right-to-left layout for Arabic without calling an external translation
+service. A recovery screen allows retrying after an unexpected client error.
+
 The login username is permanent for regular accounts. Country can be changed once
 from Profile Settings. The ZION owner account can change its displayed username
 and country whenever needed; its original login username remains the credential
@@ -93,7 +107,8 @@ support; mobile Safari has additional platform restrictions.
 
 ## 4. Media and moderation
 
-- Photos and videos are private Storage objects and limited to 15 MB.
+- Friend and Community media are encrypted, private Storage objects with the
+  current 250 MB client safety limit and resumable upload support.
 - Allowed media: JPEG, PNG, WebP, GIF, MP4, WebM, and QuickTime video.
 - Gender is self-declared and is not presented as identity-verified.
 - Admins can suspend a profile by setting `profiles.is_banned = true` and adding a `ban_reason` in Supabase Table Editor.

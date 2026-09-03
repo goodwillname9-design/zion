@@ -3,6 +3,7 @@ import "@fontsource-variable/montserrat";
 import "./globals.css";
 import "@livekit/components-styles";
 import { PwaInstall } from "./pwa-install";
+import { LanguageSwitcher } from "./language-switcher";
 
 export const metadata: Metadata = {
   title: "ZION",
@@ -31,6 +32,7 @@ export default function RootLayout({
     <html lang="en">
       <body className="antialiased">
         {children}
+        <LanguageSwitcher />
         <PwaInstall />
       </body>
     </html>

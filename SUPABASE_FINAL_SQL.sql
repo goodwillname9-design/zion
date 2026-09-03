@@ -833,3 +833,23 @@ do $$ begin
     alter publication supabase_realtime add table public.friendships;
   end if;
 end $$;
+
+-- Realtime events replace high-frequency browser polling.
+do $$
+declare table_name text;
+begin
+  foreach table_name in array array[
+    'messages','conversation_answers','conversations','friend_messages',
+    'community_messages'
+  ]
+  loop
+    if not exists(
+      select 1 from pg_publication_tables
+      where pubname='supabase_realtime'
+        and schemaname='public'
+        and tablename=table_name
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I',table_name);
+    end if;
+  end loop;
+end $$;

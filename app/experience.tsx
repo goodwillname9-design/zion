@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
+  Bell,
   Globe2,
   Heart,
   MessageCircle,
@@ -53,10 +54,14 @@ export type ZionProfile = {
 export function Experience({
   profile,
   onOpenFriends,
+  onOpenNotifications,
+  notificationCount = 0,
   onOpenAccountManager,
 }: {
   profile?: ZionProfile;
   onOpenFriends?: () => void;
+  onOpenNotifications?: () => void;
+  notificationCount?: number;
   onOpenAccountManager?: () => void;
 }) {
   const [stage, setStage] = useState<Stage>("welcome");
@@ -126,8 +131,12 @@ export function Experience({
     if (stage !== "matching" || !userId || !supabase) return;
     const client = supabase;
     let stopped = false;
+    let matchingRequestRunning = false;
 
     const findMatch = async () => {
+      if (matchingRequestRunning) return;
+      matchingRequestRunning = true;
+      try {
       const { data, error: matchError } = await client.rpc(
         "find_random_match",
         {
@@ -176,10 +185,13 @@ export function Experience({
         setAnswerSubmitted(true);
       }
       setStage("question");
+      } finally {
+        matchingRequestRunning = false;
+      }
     };
 
     void findMatch();
-    const interval = window.setInterval(() => void findMatch(), 2000);
+    const interval = window.setInterval(() => void findMatch(), 2500);
     return () => {
       stopped = true;
       window.clearInterval(interval);
@@ -217,11 +229,24 @@ export function Experience({
       }
     };
 
-    void checkAnswers();
-    const interval = window.setInterval(() => void checkAnswers(), 1500);
+    const initial = window.setTimeout(() => void checkAnswers(), 0);
+    const channel = client
+      .channel(`conversation-answers-${conversationId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "conversation_answers",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => void checkAnswers(),
+      )
+      .subscribe();
     return () => {
       stopped = true;
-      window.clearInterval(interval);
+      window.clearTimeout(initial);
+      void client.removeChannel(channel);
     };
   }, [answerSubmitted, conversationId, stage, userId]);
 
@@ -275,11 +300,7 @@ export function Experience({
       }
     };
 
-    void refreshMessages();
-    const refreshInterval = window.setInterval(
-      () => void refreshMessages(),
-      1200,
-    );
+    const initial = window.setTimeout(() => void refreshMessages(), 0);
 
     const channel = client
       .channel(`conversation-${conversationId}`)
@@ -316,7 +337,7 @@ export function Experience({
       .subscribe();
     return () => {
       stopped = true;
-      window.clearInterval(refreshInterval);
+      window.clearTimeout(initial);
       void client.removeChannel(channel);
     };
   }, [conversationId, partnerId, stage, userId]);
@@ -338,11 +359,27 @@ export function Experience({
         .maybeSingle();
       if (!stopped && data?.status === "ended") setPartnerLeft(true);
     };
-    void checkConversation();
-    const interval = window.setInterval(() => void checkConversation(), 1000);
+    const initial = window.setTimeout(() => void checkConversation(), 0);
+    const channel = client
+      .channel(`conversation-status-${conversationId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "conversations",
+          filter: `id=eq.${conversationId}`,
+        },
+        (event) => {
+          const row = event.new as { status?: string };
+          if (row.status === "ended") setPartnerLeft(true);
+        },
+      )
+      .subscribe();
     return () => {
       stopped = true;
-      window.clearInterval(interval);
+      window.clearTimeout(initial);
+      void client.removeChannel(channel);
     };
   }, [conversationId, stage]);
 
@@ -418,42 +455,49 @@ export function Experience({
       setSubmittingAnswer(false);
       return;
     }
-    const encryptedAnswer = await encryptText(
-      answer.trim(),
-      userId,
-      partnerId,
-      `random:${conversationId}`,
-    );
-    const { error: submitError } = await supabase.rpc(
-      "submit_conversation_answer",
-      {
-        p_conversation_id: conversationId,
-        p_answer: encryptedAnswer,
-      },
-    );
-    if (submitError) {
-      setError(submitError.message);
+    try {
+      const encryptedAnswer = await encryptText(
+        answer.trim(),
+        userId,
+        partnerId,
+        `random:${conversationId}`,
+      );
+      const { error: submitError } = await supabase.rpc(
+        "submit_conversation_answer",
+        {
+          p_conversation_id: conversationId,
+          p_answer: encryptedAnswer,
+        },
+      );
+      if (submitError) throw submitError;
+    } catch {
+      setError("ZION could not connect. Please try again.");
       setAnswerSubmitted(false);
+    } finally {
+      setSubmittingAnswer(false);
     }
-    setSubmittingAnswer(false);
   };
 
   const sendMessage = async () => {
     if (!supabase || !message.trim() || partnerLeft || !partnerId) return;
     const text = message.trim();
-    const encrypted = await encryptText(
-      text,
-      userId,
-      partnerId,
-      `random:${conversationId}`,
-    );
-    const { error: sendError } = await supabase.from("messages").insert({
-      conversation_id: conversationId,
-      sender_id: userId,
-      message: encrypted,
-    });
-    if (sendError) setError(sendError.message);
-    else setMessage("");
+    try {
+      const encrypted = await encryptText(
+        text,
+        userId,
+        partnerId,
+        `random:${conversationId}`,
+      );
+      const { error: sendError } = await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        sender_id: userId,
+        message: encrypted,
+      });
+      if (sendError) throw sendError;
+      setMessage("");
+    } catch {
+      setError("ZION could not connect. Please try again.");
+    }
   };
 
   const nextHuman = async () => {
@@ -519,6 +563,15 @@ export function Experience({
           <button className="friends-nav" type="button" onClick={onOpenFriends}>
             <Users size={16} />
             <b>Friends</b>
+          </button>
+          <button
+            className="friends-nav notification-nav"
+            type="button"
+            onClick={onOpenNotifications}
+          >
+            <Bell size={16} />
+            <b>Notifications</b>
+            {notificationCount ? <em>{notificationCount}</em> : null}
           </button>
           <button
             className="profile-chip"

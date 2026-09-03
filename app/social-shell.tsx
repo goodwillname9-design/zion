@@ -199,10 +199,12 @@ export function SocialShell() {
   const [profile, setProfile] = useState<ZionProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [friendsOpen, setFriendsOpen] = useState(false);
+  const [friendsInitialTab, setFriendsInitialTab] = useState<"friends" | "notifications">("friends");
   const [accountManagerOpen, setAccountManagerOpen] = useState(false);
   const [error, setError] = useState("");
   const [notificationPrompt, setNotificationPrompt] = useState(false);
   const [notificationToast, setNotificationToast] = useState("");
+  const [notificationCount, setNotificationCount] = useState(0);
   const [openingIntro, setOpeningIntro] = useState(true);
   const [encryptionState, setEncryptionState] = useState<
     "idle" | "checking" | "ready" | "locked"
@@ -294,6 +296,15 @@ export function SocialShell() {
   useEffect(() => {
     if (!supabase || !user || !profile) return;
     const client = supabase;
+    const refreshNotificationCount = async () => {
+      const { count } = await client
+        .from("friendships")
+        .select("id", { count: "exact", head: true })
+        .eq("addressee_id", user.id)
+        .eq("status", "pending");
+      setNotificationCount(count ?? 0);
+    };
+    void refreshNotificationCount();
     const channel = client
       .channel(`friend-request-alerts-${user.id}`)
       .on(
@@ -305,6 +316,7 @@ export function SocialShell() {
           filter: `addressee_id=eq.${user.id}`,
         },
         async (payload) => {
+          void refreshNotificationCount();
           const row = payload.new as { requester_id?: string; status?: string };
           if (row.status !== "pending" || !row.requester_id) return;
           const { data: sender } = await client
@@ -375,13 +387,22 @@ export function SocialShell() {
     <>
       <Experience
         profile={profile}
-        onOpenFriends={() => setFriendsOpen(true)}
+        onOpenFriends={() => {
+          setFriendsInitialTab("friends");
+          setFriendsOpen(true);
+        }}
+        onOpenNotifications={() => {
+          setFriendsInitialTab("notifications");
+          setFriendsOpen(true);
+        }}
+        notificationCount={notificationCount}
         onOpenAccountManager={() => setAccountManagerOpen(true)}
       />
       {friendsOpen ? (
         <FriendsPanel
           user={user}
           profile={profile}
+          initialTab={friendsInitialTab}
           onProfileUpdated={setProfile}
           onClose={() => setFriendsOpen(false)}
         />
@@ -396,6 +417,7 @@ export function SocialShell() {
         <button
           className="notification-toast"
           onClick={() => {
+            setFriendsInitialTab("notifications");
             setFriendsOpen(true);
             setNotificationToast("");
           }}
@@ -967,11 +989,13 @@ function BanScreen({ reason }: { reason: string | null }) {
 function FriendsPanel({
   user,
   profile,
+  initialTab,
   onProfileUpdated,
   onClose,
 }: {
   user: User;
   profile: ZionProfile;
+  initialTab: "friends" | "notifications";
   onProfileUpdated: (profile: ZionProfile) => void;
   onClose: () => void;
 }) {
@@ -982,7 +1006,7 @@ function FriendsPanel({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
     "friends" | "notifications" | "find" | "profile" | "communities" | "admin"
-  >("friends");
+  >(initialTab);
   const [searchName, setSearchName] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchResult, setSearchResult] = useState<
@@ -1055,10 +1079,28 @@ function FriendsPanel({
     }
   }, [user.id]);
   useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => void load(), 2500);
-    return () => window.clearInterval(timer);
-  }, [load]);
+    if (!supabase) return;
+    const client = supabase;
+    const initial = window.setTimeout(() => void load(), 0);
+    let debounce: number | null = null;
+    const refresh = () => {
+      if (debounce) window.clearTimeout(debounce);
+      debounce = window.setTimeout(() => void load(), 180);
+    };
+    const channel = client
+      .channel(`friends-panel-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "friendships" },
+        refresh,
+      )
+      .subscribe();
+    return () => {
+      window.clearTimeout(initial);
+      if (debounce) window.clearTimeout(debounce);
+      void client.removeChannel(channel);
+    };
+  }, [load, user.id]);
   const otherId = useCallback(
     (item: Friendship) =>
       item.requester_id === user.id ? item.addressee_id : item.requester_id,
@@ -1459,15 +1501,6 @@ function FriendsPanel({
             <Users /> Friends
           </button>
           <button
-            className={activeTab === "notifications" ? "active" : ""}
-            onClick={() => setActiveTab("notifications")}
-          >
-            <Bell /> Alerts
-            {pendingRequests.length ? (
-              <em className="notification-count">{pendingRequests.length}</em>
-            ) : null}
-          </button>
-          <button
             className={activeTab === "find" ? "active" : ""}
             onClick={() => setActiveTab("find")}
           >
@@ -1823,12 +1856,25 @@ function CommunityPanel({ user, friends }: { user: User; friends: ZionProfile[] 
   }, [secret, selected]);
 
   useEffect(() => {
-    if (!selected || !secret) return;
+    if (!selected || !secret || !supabase) return;
+    const client = supabase;
     const first = window.setTimeout(() => void loadMessages(), 0);
-    const timer = window.setInterval(() => void loadMessages(), 1500);
+    const channel = client
+      .channel(`community-messages-${selected.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "community_messages",
+          filter: `community_id=eq.${selected.id}`,
+        },
+        () => void loadMessages(),
+      )
+      .subscribe();
     return () => {
       window.clearTimeout(first);
-      window.clearInterval(timer);
+      void client.removeChannel(channel);
     };
   }, [loadMessages, secret, selected]);
 
@@ -2317,9 +2363,8 @@ function FriendChat({
     };
   }, [callState]);
   useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => void load(), 1500);
-    return () => window.clearInterval(timer);
+    const initial = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(initial);
   }, [load]);
   useEffect(() => {
     listRef.current?.scrollTo({
@@ -2335,6 +2380,16 @@ function FriendChat({
       .channel(`friend-live-${friendship.id}`, {
         config: { private: true, presence: { key: user.id } },
       })
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "friend_messages",
+          filter: `friendship_id=eq.${friendship.id}`,
+        },
+        () => void load(),
+      )
       .on("presence", { event: "sync" }, () => {
         const presence = channel.presenceState();
         setFriendOnline(Boolean(presence[friendId]));
@@ -2440,7 +2495,7 @@ function FriendChat({
       mediaUrls.forEach((url) => URL.revokeObjectURL(url));
       mediaUrls.clear();
     };
-  }, [ensurePeer, friendId, friendship.id, stopCall, user.id]);
+  }, [ensurePeer, friendId, friendship.id, load, stopCall, user.id]);
   const announceTyping = (typing: boolean) => {
     void liveRef.current?.send({
       type: "broadcast",
