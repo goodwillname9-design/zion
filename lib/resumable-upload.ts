@@ -19,11 +19,15 @@ export async function uploadResumable({
 }) {
   if (!supabase) throw new Error("Storage is not configured.");
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const { data } = await supabase.auth.getSession();
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  let { data } = await supabase.auth.getSession();
+  if (!data.session?.access_token) {
+    const refreshed = await supabase.auth.refreshSession();
+    data = refreshed.data;
+  }
   const accessToken = data.session?.access_token;
   if (!supabaseUrl || !anonKey || !accessToken)
-    throw new Error("Sign in again before uploading.");
+    throw new Error("Your secure session could not be refreshed. Please reopen ZION and try again.");
 
   const endpoint = `${supabaseUrl.replace(/\/$/, "")}/storage/v1/upload/resumable`;
   await new Promise<void>((resolve, reject) => {
