@@ -266,7 +266,14 @@ input {
 }
 .games-hub,
 .game-room {
-  padding: 8px 2px 24px;
+  position: fixed;
+  z-index: 20000;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  overflow: auto;
+  padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+  background: radial-gradient(circle at 50% -10%, #2e2755 0, #131126 44%, #090815 100%);
 }
 .games-title,
 .game-invite,
@@ -333,10 +340,12 @@ input {
 .game-list button > span { font-size: 27px; }
 .game-list strong { font-size: 11px; }
 .game-notice { color: #d9ff83; text-align: center; }
-.game-room header { margin-bottom: 16px; }
+.game-room header { position:sticky; z-index:30; top:0; width:min(760px,100%); margin:0 auto 16px; padding:10px; border:1px solid rgba(255,255,255,.1); border-radius:18px; background:rgba(16,14,34,.88); backdrop-filter:blur(18px); }
 .game-room header > button { width: 42px; height: 42px; display:grid; place-items:center; border:0; border-radius:50%; color:#fff; background:rgba(255,255,255,.08); }
 .game-room header > div { flex:1; display:grid; }
-.game-room header > span { padding:8px 11px; border-radius:999px; font-size:10px; font-weight:900; }
+.game-room header > span { display:flex; align-items:center; gap:6px; padding:8px 11px; border-radius:999px; font-size:10px; font-weight:900; }
+.game-room header > span i { width:7px; height:7px; border-radius:50%; background:#858091; }
+.game-room header > span i.live { background:#59f1b9; box-shadow:0 0 9px #59f1b9; }
 .your-turn { color:#15132b; background:#d9ff83; box-shadow:0 0 18px rgba(217,255,131,.25); }
 .their-turn { color:#bdb7c9; background:rgba(255,255,255,.08); }
 .game-result { margin: 10px 0 16px; padding: 16px; display:flex; justify-content:center; align-items:center; gap:9px; border-radius:18px; color:#ffe889; background:linear-gradient(135deg,rgba(255,219,93,.18),rgba(255,255,255,.04)); font-size:20px; font-weight:900; }
@@ -351,15 +360,38 @@ input {
 .chess-board button.selected { box-shadow:inset 0 0 0 4px #d9ff83; }
 .chess-board span { color:#171225; font-family:serif; font-size:clamp(24px,7vw,48px); line-height:1; filter:drop-shadow(0 3px 2px rgba(255,255,255,.25)); }
 .chess-board small { position:absolute; inset-inline-end:3px; bottom:1px; color:rgba(0,0,0,.43); font-size:7px; }
-.ludo-game { text-align:center; }
-.ludo-board { position:relative; width:min(500px,100%); aspect-ratio:1; margin:14px auto; border:8px solid #292142; border-radius:28px; overflow:hidden; background:conic-gradient(from 45deg,#ff5474 0 25%,#5ad8ff 0 50%,#ffd95a 0 75%,#6df2a8 0); box-shadow:0 28px 65px rgba(0,0,0,.42); }
-.ludo-home { position:absolute; inset:8%; display:grid; grid-template-columns:1fr 1fr; gap:9px; padding:9%; border-radius:24%; background:rgba(255,255,255,.91); }
-.ludo-home button { position:relative; border:3px solid #ff5474; border-radius:50%; background:#ffd8df; overflow:visible; cursor:pointer; }
-.ludo-home i { position:absolute; left:50%; bottom:20%; width:34%; aspect-ratio:1; border-radius:50% 50% 50% 0; background:linear-gradient(135deg,#ff6c88,#d81442); transform-origin:center; box-shadow:0 5px 10px rgba(216,20,66,.35); }
-.ludo-track { position:absolute; inset:3%; display:grid; grid-template-columns:repeat(10,1fr); gap:3px; pointer-events:none; }
-.ludo-track span { border-radius:5px; background:rgba(255,255,255,.55); box-shadow:inset 0 0 0 1px rgba(0,0,0,.08); }
-.ludo-track span.safe { background:#fff4a7; }
-.ludo-center { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:26%; aspect-ratio:1; display:grid; place-items:center; border-radius:50%; color:#15132b; background:linear-gradient(135deg,#d9ff83,#67edbd); font-weight:1000; box-shadow:0 0 35px rgba(217,255,131,.55); }
+.ludo-game { width:min(700px,100%); margin:auto; text-align:center; }
+.ludo-board-pro { position:relative; width:min(620px,calc(100dvh - 190px),100%); aspect-ratio:1; margin:8px auto 14px; display:grid; grid-template:repeat(15,1fr)/repeat(15,1fr); overflow:hidden; border:7px solid #332a52; border-radius:24px; background:#f9f5e9; box-shadow:0 28px 75px rgba(0,0,0,.52),inset 0 0 0 2px rgba(255,255,255,.4); }
+.ludo-base { z-index:1; margin:2px; display:grid; place-items:center; border-radius:13%; box-shadow:inset 0 0 0 12px currentColor,inset 0 0 0 14px rgba(255,255,255,.55); }
+.ludo-base b { padding:4px 7px; border-radius:999px; color:white; background:rgba(0,0,0,.28); font-size:clamp(7px,1.8vw,11px); letter-spacing:.08em; }
+.base-red { grid-area:1/1/7/7; color:#ed3159; background:#ffb2c1; }
+.base-green { grid-area:1/10/7/16; color:#22ba78; background:#a8f0cf; }
+.base-blue { grid-area:10/1/16/7; color:#319ddf; background:#aadffc; }
+.base-yellow { grid-area:10/10/16/16; color:#eeb828; background:#ffe89d; }
+.ludo-cell { z-index:3; display:grid; place-items:center; border:1px solid #b9b2a5; color:#928873; background:linear-gradient(145deg,#fff,#ebe5d8); font-size:clamp(6px,1.7vw,12px); }
+.ludo-cell.safe { color:#fff; background:linear-gradient(145deg,#ffcd55,#e9a821); text-shadow:0 1px 2px rgba(0,0,0,.35); }
+.ludo-cell.lane-red { background:linear-gradient(145deg,#ff8ca3,#eb3159); }
+.ludo-cell.lane-green { background:linear-gradient(145deg,#77e7b4,#20b977); }
+.ludo-cell.lane-blue { background:linear-gradient(145deg,#81cef7,#319ddf); }
+.ludo-cell.lane-yellow { background:linear-gradient(145deg,#ffe27b,#eeb828); }
+.ludo-finish { z-index:4; grid-area:7/7/10/10; position:relative; overflow:hidden; background:conic-gradient(from 45deg,#20bb78 0 25%,#eeb828 0 50%,#319ddf 0 75%,#ed3159 0); }
+.ludo-finish b { position:absolute; inset:28%; display:grid; place-items:center; border-radius:50%; color:#171328; background:#efffbe; font-size:clamp(12px,4vw,27px); box-shadow:0 0 18px rgba(239,255,190,.8); }
+.ludo-token { z-index:12; align-self:center; justify-self:center; width:72%; aspect-ratio:1; padding:0; display:grid; place-items:center; border:0; border-radius:50% 50% 50% 8%; transform:rotate(-45deg) scale(.76); filter:drop-shadow(0 4px 3px rgba(0,0,0,.35)); transition:transform .24s cubic-bezier(.2,.9,.25,1.4),filter .2s; }
+.ludo-token i { width:45%; aspect-ratio:1; border-radius:50%; background:rgba(255,255,255,.72); box-shadow:inset 0 2px 2px rgba(0,0,0,.2); }
+.token-red { background:linear-gradient(135deg,#ff708c,#c90e39); }
+.token-green { background:linear-gradient(135deg,#66edac,#098c56); }
+.ludo-token.movable { cursor:pointer; animation:token-glow .8s ease-in-out infinite alternate; }
+.ludo-token:disabled { opacity:1; }
+.ludo-controls { display:flex; flex-direction:column; align-items:center; }
+.dice-button-pro { min-width:170px; min-height:72px; display:flex; align-items:center; justify-content:center; gap:13px; padding:8px 18px; border:1px solid rgba(255,255,255,.35); border-radius:20px; color:#171328; background:linear-gradient(145deg,#fff,#d9ff83); box-shadow:0 15px 35px rgba(217,255,131,.2),inset 0 2px 0 #fff; font-weight:1000; cursor:pointer; }
+.dice-button-pro:disabled { cursor:not-allowed; opacity:.68; }
+.dice-cube { width:48px; aspect-ratio:1; padding:8px; display:grid; grid-template-columns:repeat(3,1fr); gap:4px; border-radius:12px; background:linear-gradient(145deg,#fff,#d8d4cb); box-shadow:5px 6px 0 #817a91,0 10px 18px rgba(0,0,0,.25); }
+.dice-cube i { border-radius:50%; }
+.dice-cube i.pip { background:#251d3e; box-shadow:inset 0 1px 2px rgba(0,0,0,.55); }
+.dice-cube.rolling { animation:dice-roll .52s ease-in-out; }
+.ludo-controls p { margin:10px 0 0; color:#a9a3b7; font-size:12px; }
+@keyframes dice-roll { 25%{transform:rotate(90deg) scale(.85)} 55%{transform:rotate(210deg) scale(1.13)} 100%{transform:rotate(360deg)} }
+@keyframes token-glow { to{transform:rotate(-45deg) scale(.93);filter:drop-shadow(0 0 10px #fff) drop-shadow(0 0 16px currentColor)} }
 .dice-button { min-width:126px; min-height:52px; display:inline-flex; justify-content:center; align-items:center; gap:9px; border:0; border-radius:16px; color:#17132a; background:linear-gradient(135deg,#fff,#d9ff83); font-size:17px; font-weight:1000; box-shadow:0 12px 28px rgba(217,255,131,.18); cursor:pointer; }
 html[dir="rtl"] body,
 html[dir="rtl"] input,

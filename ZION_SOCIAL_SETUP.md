@@ -67,6 +67,12 @@ protected by RLS so only the two players can view or update that session. Run
 the complete latest SQL before deploying the code; it also adds `friend_games`
 to Supabase Realtime.
 
+All three games open in an app-level full-screen room with a persistent Back
+button and live connection indicator. Moves are shown optimistically on the
+current device and merged directly from Realtime events on the other device.
+The Ludo board uses a classic 15×15 four-colour layout, home yards, cross track,
+safe stars, coloured home paths, animated dice and highlighted movable tokens.
+
 The login username is permanent for regular accounts. Country can be changed once
 from Profile Settings. The ZION owner account can change its displayed username
 and country whenever needed; its original login username remains the credential

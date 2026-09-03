@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Chess } from "chess.js";
-import { ArrowLeft, Crown, Dices, Gamepad2, Swords } from "lucide-react";
+import { ArrowLeft, Crown, Gamepad2, Swords } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 
 import { supabase } from "@/lib/supabase";
@@ -45,7 +45,9 @@ export function FriendGames({ user, friends }: { user: User; friends: GameFriend
   const [friendshipId, setFriendshipId] = useState(friends[0]?.friendshipId ?? "");
   const [gameType, setGameType] = useState<GameType>("ludo");
   const [busy, setBusy] = useState(false);
+  const [moveBusy, setMoveBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [syncStatus, setSyncStatus] = useState<"connecting" | "live">("connecting");
 
   const load = useCallback(async () => {
     if (!supabase) return;
@@ -70,10 +72,24 @@ export function FriendGames({ user, friends }: { user: User; friends: GameFriend
     void load();
     const channel = client
       .channel(`friend-games-${user.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "friend_games" }, () => void load())
-      .subscribe();
+      .on("postgres_changes", { event: "*", schema: "public", table: "friend_games" }, (event) => {
+        const incoming = event.new as GameRow;
+        if (!incoming?.id) return void load();
+        setGames((current) => [incoming, ...current.filter((item) => item.id !== incoming.id)]);
+        setSelected((current) => current?.id === incoming.id ? incoming : current);
+      })
+      .subscribe((status) => setSyncStatus(status === "SUBSCRIBED" ? "live" : "connecting"));
     return () => void client.removeChannel(channel);
   }, [load, user.id]);
+
+  useEffect(() => {
+    if (!selected) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelected(null);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [selected]);
 
   const friendFor = (game: GameRow) =>
     friends.find((item) => item.friendshipId === game.friendship_id)?.profile;
@@ -114,16 +130,35 @@ export function FriendGames({ user, friends }: { user: User; friends: GameFriend
     winner: string | null = null,
     finished = false,
   ) => {
-    if (!supabase || game.current_turn !== user.id) return false;
-    const { error } = await supabase
+    if (!supabase || game.current_turn !== user.id || moveBusy) return false;
+    setMoveBusy(true);
+    const optimistic: GameRow = {
+      ...game,
+      state,
+      current_turn: nextTurn,
+      winner_id: winner,
+      status: finished ? "finished" : "active",
+    };
+    setSelected(optimistic);
+    setGames((current) => current.map((item) => item.id === game.id ? optimistic : item));
+    const { data, error } = await supabase
       .from("friend_games")
       .update({ state, current_turn: nextTurn, winner_id: winner, status: finished ? "finished" : "active" })
       .eq("id", game.id)
       .eq("status", "active")
       .eq("current_turn", user.id)
-      .eq("updated_at", game.updated_at);
-    if (error) setNotice("That turn already changed. Board refreshed.");
-    await load();
+      .eq("updated_at", game.updated_at)
+      .select("id,friendship_id,inviter_id,opponent_id,game_type,status,state,current_turn,winner_id,updated_at")
+      .single();
+    if (error) {
+      setNotice("That turn already changed. Board refreshed.");
+      await load();
+    } else if (data) {
+      const fresh = data as GameRow;
+      setSelected(fresh);
+      setGames((current) => current.map((item) => item.id === fresh.id ? fresh : item));
+    }
+    setMoveBusy(false);
     return !error;
   };
 
@@ -135,7 +170,8 @@ export function FriendGames({ user, friends }: { user: User; friends: GameFriend
           <button onClick={() => setSelected(null)}><ArrowLeft /></button>
           <div><b>{labels[selected.game_type]}</b><small>Playing with {friend?.username ?? "friend"}</small></div>
           <span className={selected.current_turn === user.id ? "your-turn" : "their-turn"}>
-            {selected.status === "finished" ? "Game finished" : selected.current_turn === user.id ? "Your turn" : "Friend’s turn"}
+            <i className={syncStatus} />
+            {syncStatus === "connecting" ? "Connecting…" : selected.status === "finished" ? "Game finished" : selected.current_turn === user.id ? "Your turn" : "Friend’s turn"}
           </span>
         </header>
         {selected.status === "finished" ? (
@@ -216,25 +252,98 @@ function ChessBoard({ game, userId, save }: { game: GameRow; userId: string; sav
   return <div className="chess-board">{squares.map((item) => <button key={item.square} className={`${item.dark ? "dark" : "light"} ${from === item.square ? "selected" : ""}`} onClick={() => click(item.square)}><span>{item.piece}</span><small>{item.square}</small></button>)}</div>;
 }
 
+const LUDO_PATH: Array<[number, number]> = [
+  [6,1],[6,2],[6,3],[6,4],[6,5],[5,6],[4,6],[3,6],[2,6],[1,6],[0,6],[0,7],[0,8],
+  [1,8],[2,8],[3,8],[4,8],[5,8],[6,9],[6,10],[6,11],[6,12],[6,13],[6,14],[7,14],[8,14],
+  [8,13],[8,12],[8,11],[8,10],[8,9],[9,8],[10,8],[11,8],[12,8],[13,8],[14,8],[14,7],[14,6],
+  [13,6],[12,6],[11,6],[10,6],[9,6],[8,5],[8,4],[8,3],[8,2],[8,1],[8,0],[7,0],[6,0],
+];
+const RED_BASE: Array<[number, number]> = [[1,1],[1,4],[4,1],[4,4]];
+const GREEN_BASE: Array<[number, number]> = [[1,10],[1,13],[4,10],[4,13]];
+const RED_HOME: Array<[number, number]> = [[7,1],[7,2],[7,3],[7,4],[7,5],[7,7]];
+const GREEN_HOME: Array<[number, number]> = [[1,7],[2,7],[3,7],[4,7],[5,7],[7,7]];
+
+function tokenCell(position: number, color: "red" | "green", index: number): [number, number] {
+  if (position < 0) return (color === "red" ? RED_BASE : GREEN_BASE)[index];
+  if (position >= 52) return (color === "red" ? RED_HOME : GREEN_HOME)[Math.min(position - 52, 5)];
+  const start = color === "red" ? 0 : 13;
+  return LUDO_PATH[(start + position) % LUDO_PATH.length];
+}
+
+function DiceFace({ value, rolling }: { value: number | null; rolling: boolean }) {
+  const active: Record<number, number[]> = {
+    1:[4], 2:[0,8], 3:[0,4,8], 4:[0,2,6,8], 5:[0,2,4,6,8], 6:[0,2,3,5,6,8],
+  };
+  return (
+    <span className={`dice-cube ${rolling ? "rolling" : ""}`}>
+      {Array.from({ length: 9 }, (_, index) => <i key={index} className={value && active[value].includes(index) ? "pip" : ""} />)}
+    </span>
+  );
+}
+
 function LudoBoard({ game, userId, save }: { game: GameRow; userId: string; save: SaveMove }) {
+  const [rolling, setRolling] = useState(false);
   const pieces = (game.state.pieces as Record<string, number[]>) ?? {};
+  const rivalId = opponent(game, userId);
+  const mineColor = game.inviter_id === userId ? "red" : "green";
+  const rivalColor = mineColor === "red" ? "green" : "red";
   const mine = pieces[userId] ?? [-1,-1,-1,-1];
+  const theirs = pieces[rivalId] ?? [-1,-1,-1,-1];
   const dice = typeof game.state.dice === "number" ? game.state.dice : null;
   const roll = () => {
-    if (game.current_turn !== userId || dice !== null) return;
-    const value = Math.floor(Math.random()*6)+1;
-    const canMove = mine.some((position) => position >= 0 ? position + value <= 40 : value === 6);
-    void save(game, { ...game.state, dice: canMove ? value : null }, canMove ? userId : opponent(game,userId));
+    if (game.current_turn !== userId || dice !== null || rolling) return;
+    setRolling(true);
+    window.setTimeout(() => {
+      const value = Math.floor(Math.random()*6)+1;
+      const canMove = mine.some((position) => position >= 0 ? position + value <= 57 : value === 6);
+      setRolling(false);
+      void save(game, { ...game.state, dice: canMove ? value : null }, canMove ? userId : rivalId);
+    }, 520);
   };
   const move = (index: number) => {
     if (game.current_turn !== userId || dice === null) return;
     const current = mine[index];
-    const nextPosition = current < 0 && dice === 6 ? 0 : current >= 0 && current + dice <= 40 ? current + dice : current;
+    const nextPosition = current < 0 && dice === 6 ? 0 : current >= 0 && current + dice <= 57 ? current + dice : current;
     if (nextPosition === current) return;
     const nextMine = [...mine]; nextMine[index] = nextPosition;
-    const nextPieces = { ...pieces, [userId]: nextMine };
-    const won = nextMine.every((position) => position === 40);
-    void save(game, { pieces: nextPieces, dice: null }, won ? null : dice === 6 ? userId : opponent(game,userId), won ? userId : null, won);
+    const nextTheirs = [...theirs];
+    if (nextPosition < 52 && ![0,8,13,21,26,34,39,47].includes(nextPosition)) {
+      const landing = tokenCell(nextPosition, mineColor, index).join("-");
+      nextTheirs.forEach((position, rivalIndex) => {
+        if (position >= 0 && position < 52 && tokenCell(position, rivalColor, rivalIndex).join("-") === landing)
+          nextTheirs[rivalIndex] = -1;
+      });
+    }
+    const nextPieces = { ...pieces, [userId]: nextMine, [rivalId]: nextTheirs };
+    const won = nextMine.every((position) => position === 57);
+    void save(game, { pieces: nextPieces, dice: null }, won ? null : dice === 6 ? userId : rivalId, won ? userId : null, won);
   };
-  return <div className="ludo-game"><div className="ludo-board"><div className="ludo-home red">{mine.map((position,index) => <button key={index} onClick={() => move(index)} title={`Piece ${index+1}: ${position < 0 ? "home" : position === 40 ? "finished" : position}`}><i style={{ transform: `translateY(${-Math.min(Math.max(position,0),40)*2}px)` }} /></button>)}</div><div className="ludo-track">{Array.from({length:40},(_,i)=><span key={i} className={i%4===0 ? "safe" : ""} />)}</div><div className="ludo-center">ZION</div></div><button className="dice-button" onClick={roll} disabled={game.current_turn !== userId || dice !== null}><Dices />{dice ?? "ROLL"}</button><p>{dice ? "Choose a piece to move" : "Roll the dice on your turn"}</p></div>;
+  const trackSet = new Set(LUDO_PATH.map(([row,col]) => `${row}-${col}`));
+  return (
+    <div className="ludo-game">
+      <div className="ludo-board-pro">
+        <div className="ludo-base base-red"><b>{mineColor === "red" ? "YOU" : "FRIEND"}</b></div>
+        <div className="ludo-base base-green"><b>{mineColor === "green" ? "YOU" : "FRIEND"}</b></div>
+        <div className="ludo-base base-blue" />
+        <div className="ludo-base base-yellow" />
+        {Array.from({ length: 225 }, (_, index) => {
+          const row = Math.floor(index / 15), col = index % 15, key = `${row}-${col}`;
+          const lane = row === 7 && col > 0 && col < 6 ? "lane-red" : col === 7 && row > 0 && row < 6 ? "lane-green" : row === 7 && col > 8 && col < 14 ? "lane-yellow" : col === 7 && row > 8 && row < 14 ? "lane-blue" : "";
+          if (!trackSet.has(key) && !lane) return null;
+          const safe = [[6,1],[2,6],[1,8],[6,12],[8,13],[12,8],[13,6],[8,2]].some(([r,c]) => r===row && c===col);
+          return <span key={key} className={`ludo-cell ${lane} ${safe ? "safe" : ""}`} style={{ gridRow: row+1, gridColumn: col+1 }}>{safe ? "★" : ""}</span>;
+        })}
+        <div className="ludo-finish"><span /><span /><span /><span /><b>Z</b></div>
+        {theirs.map((position,index) => { const [row,col]=tokenCell(position,rivalColor,index); return <span key={`rival${index}`} className={`ludo-token token-${rivalColor}`} style={{gridRow:row+1,gridColumn:col+1}}><i /></span>; })}
+        {mine.map((position,index) => { const [row,col]=tokenCell(position,mineColor,index); const movable=dice !== null && (position < 0 ? dice===6 : position+dice<=57); return <button key={`mine${index}`} className={`ludo-token token-${mineColor} ${movable ? "movable" : ""}`} style={{gridRow:row+1,gridColumn:col+1}} onClick={() => move(index)} disabled={!movable}><i /></button>; })}
+      </div>
+      <div className="ludo-controls">
+        <button className="dice-button-pro" onClick={roll} disabled={game.current_turn !== userId || dice !== null || rolling}>
+          <DiceFace value={rolling ? null : dice} rolling={rolling} />
+          <strong>{rolling ? "ROLLING…" : dice ? `DICE ${dice}` : game.current_turn === userId ? "ROLL DICE" : "WAIT"}</strong>
+        </button>
+        <p>{dice ? "Tap your glowing token" : game.current_turn === userId ? "Your turn — roll the dice" : "Waiting for your friend’s move"}</p>
+      </div>
+    </div>
+  );
 }
