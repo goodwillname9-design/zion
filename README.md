@@ -37,6 +37,7 @@ The connected version supports anonymous sign-in, random matching, protected ans
 Before a large public launch, add automated moderation, rate limiting, admin review tools, legal/privacy pages, and professional safety testing.
 # Latest social upgrade
 
+- Reels always includes a looping 10-second official “MAKE FRIENDS · ZION WORLDWIDE” demo by Ceo mubieeyy.
 - Notification Center now includes direct Accept/Decline game invitations; Accept opens the game immediately.
 - Ludo supports 2–4 invited players, dotted animated dice, safe cells, captures, exact finish and bonus turns.
 - ZION Reels provides a worldwide vertical video feed with upload, like, comment, share, creator profile, follow and friend request actions.

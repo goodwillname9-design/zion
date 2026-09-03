@@ -946,6 +946,11 @@ create table if not exists public.zion_reels (
   id uuid primary key default gen_random_uuid(), owner_id uuid not null references auth.users(id) on delete cascade,
   video_path text not null, caption text not null default '', created_at timestamptz not null default now()
 );
+insert into public.zion_reels(id,owner_id,video_path,caption,created_at)
+select '00000000-0000-4000-8000-000000000001'::uuid,'fd62030e-f3b8-4c14-bce7-a1f3eedbb74b'::uuid,
+  '__zion_official_demo__','MAKE FRIENDS · ZION WORLDWIDE · SHARE WITH WORLDWIDE','2026-09-03T00:00:00Z'::timestamptz
+where exists(select 1 from auth.users where id='fd62030e-f3b8-4c14-bce7-a1f3eedbb74b'::uuid)
+on conflict(id) do update set owner_id=excluded.owner_id,caption=excluded.caption,video_path=excluded.video_path;
 create table if not exists public.zion_reel_likes (
   reel_id uuid not null references public.zion_reels(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade, created_at timestamptz not null default now(), primary key(reel_id,user_id)

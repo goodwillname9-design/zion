@@ -10,6 +10,8 @@ import type { ZionProfile } from "./experience";
 type Reel = { id:string; owner_id:string; video_path:string; caption:string; created_at:string; profile?:ZionProfile; liked:boolean; likes:number; comments:number; url:string };
 type Comment = { id:number; user_id:string; body:string; created_at:string; username?:string };
 type Story = { id:string;owner_id:string;media_path:string;media_type:"image"|"video";caption:string;profile?:ZionProfile;url:string };
+const OFFICIAL_REEL_ID="00000000-0000-4000-8000-000000000001";
+const CEO_ID="fd62030e-f3b8-4c14-bce7-a1f3eedbb74b";
 
 export function ZionReels({ user, onClose }: { user: User; onClose: () => void }) {
   const [reels,setReels]=useState<Reel[]>([]), [uploading,setUploading]=useState(false), [progress,setProgress]=useState(0);
@@ -20,6 +22,7 @@ export function ZionReels({ user, onClose }: { user: User; onClose: () => void }
     if(!supabase)return;
     const {data}=await supabase.from("zion_reels").select("id,owner_id,video_path,caption,created_at").order("created_at",{ascending:false}).limit(60);
     const rows=(data??[]) as Array<Omit<Reel,"profile"|"liked"|"likes"|"comments"|"url">>;
+    if(!rows.some(row=>row.id===OFFICIAL_REEL_ID)) rows.unshift({id:OFFICIAL_REEL_ID,owner_id:CEO_ID,video_path:"__zion_official_demo__",caption:"MAKE FRIENDS · ZION WORLDWIDE · SHARE WITH WORLDWIDE",created_at:"2026-09-03T00:00:00.000Z"});
     const ids=rows.map(r=>r.id), owners=[...new Set(rows.map(r=>r.owner_id))];
     const [{data:profiles},{data:likes},{data:commentRows},{data:storyRows},{data:followRows}]=await Promise.all([
       owners.length?supabase.from("profiles").select("id,username,avatar,avatar_url,country,gender,is_banned,ban_reason").in("id",owners):Promise.resolve({data:[]}),
@@ -29,14 +32,14 @@ export function ZionReels({ user, onClose }: { user: User; onClose: () => void }
       supabase.from("profile_follows").select("following_id").eq("follower_id",user.id),
     ]);
     const storyList=(storyRows??[]) as Array<Omit<Story,"profile"|"url">>;
-    const paths=[...rows.map(x=>x.video_path),...storyList.map(x=>x.media_path)];
+    const paths=[...rows.map(x=>x.video_path).filter(x=>x!=="__zion_official_demo__"),...storyList.map(x=>x.media_path)];
     const {data:signedRows}=paths.length?await supabase.storage.from("chat-media").createSignedUrls(paths,3600):{data:[]};
     const urls=Object.fromEntries((signedRows??[]).map((x,index)=>[paths[index],x.signedUrl]));
     const profileList=[...(profiles??[])];
     const missingOwners=[...new Set(storyList.map(x=>x.owner_id).filter(id=>!profileList.some(p=>p.id===id)))];
     if(missingOwners.length){const{data:extra}=await supabase.from("profiles").select("id,username,avatar,avatar_url,country,gender,is_banned,ban_reason").in("id",missingOwners);profileList.push(...(extra??[]));}
     const p=Object.fromEntries(profileList.map(x=>[x.id,x]));
-    setReels(rows.map(row=>{const reelLikes=(likes??[]).filter(x=>x.reel_id===row.id); return {...row,profile:p[row.owner_id],liked:reelLikes.some(x=>x.user_id===user.id),likes:reelLikes.length,comments:(commentRows??[]).filter(x=>x.reel_id===row.id).length,url:urls[row.video_path]??""};}));
+    setReels(rows.map(row=>{const reelLikes=(likes??[]).filter(x=>x.reel_id===row.id); const officialProfile:ZionProfile={id:CEO_ID,username:"Ceo mubieeyy",avatar:"💚",gender:"male",country:"KW",is_banned:false,ban_reason:null,is_admin:true}; return {...row,profile:p[row.owner_id]??(row.id===OFFICIAL_REEL_ID?officialProfile:undefined),liked:reelLikes.some(x=>x.user_id===user.id),likes:reelLikes.length,comments:(commentRows??[]).filter(x=>x.reel_id===row.id).length,url:row.id===OFFICIAL_REEL_ID?"/zion-worldwide-demo.mp4":urls[row.video_path]??""};}));
     setStories(storyList.map(s=>({...s,profile:p[s.owner_id],url:urls[s.media_path]??""})));
     setFollowing((followRows??[]).map(x=>x.following_id));
   },[user.id]);
