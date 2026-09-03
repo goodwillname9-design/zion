@@ -1620,6 +1620,9 @@ footer span {
   overflow: auto;
   padding: 16px 4px;
   scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(109, 242, 193, 0.35) transparent;
+  overscroll-behavior: contain;
 }
 .friend-bubble {
   position: relative;
@@ -1632,7 +1635,58 @@ footer span {
   background: #272343;
   overflow: hidden;
   animation: rise 0.22s ease-out both;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.14);
+  content-visibility: auto;
+  contain-intrinsic-size: 52px;
 }
+
+.profile-social-counts {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: 12px 0 4px;
+}
+.profile-social-counts span {
+  min-width: 96px;
+  display: grid;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px solid rgba(109, 242, 193, 0.16);
+  border-radius: 15px;
+  background: rgba(109, 242, 193, 0.055);
+  text-align: center;
+}
+.profile-social-counts b { color: #d9ff83; font-size: 16px; }
+.profile-social-counts small { color: #8e899b; font-size: 9px; }
+
+.community-panel,
+.community-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.community-title,
+.community-chat-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px 14px; }
+.community-title h2 { margin: 3px 0 0; }
+.community-title > button,
+.community-chat-head > button { border: 1px solid rgba(109,242,193,.22); border-radius: 13px; padding: 10px 13px; color: #d9ff83; background: rgba(109,242,193,.07); cursor: pointer; }
+.community-create { display: grid; gap: 10px; padding: 14px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,.09); border-radius: 18px; background: rgba(255,255,255,.025); }
+.community-create > input { min-height: 48px; padding: 0 14px; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; outline: 0; color: #fff; background: rgba(255,255,255,.04); }
+.community-member-picker { max-height: 190px; overflow: auto; display: grid; gap: 6px; }
+.community-member-picker label { display: flex; align-items: center; gap: 9px; padding: 8px; border-radius: 12px; background: rgba(255,255,255,.035); cursor: pointer; }
+.community-member-picker .profile-avatar { width: 34px; height: 34px; font-size: 20px; }
+.community-list { display: grid; gap: 8px; overflow: auto; }
+.community-list > button { display: flex; align-items: center; gap: 11px; width: 100%; padding: 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 16px; color: #eeeaf7; background: rgba(255,255,255,.028); text-align: left; cursor: pointer; transition: transform .18s ease, border-color .18s ease, background .18s ease; }
+.community-list > button:hover { transform: translateY(-1px); border-color: rgba(109,242,193,.28); background: rgba(109,242,193,.055); }
+.community-list > button > span { width: 43px; height: 43px; display: grid; place-items: center; border-radius: 14px; background: linear-gradient(135deg,#d9ff83,#6df2c1); font-size: 20px; }
+.community-list > button div { flex: 1; display: grid; gap: 3px; }
+.community-list small,
+.community-chat-head small { display: block; color: #8e899b; font-size: 9px; }
+.community-message-list { flex: 1; min-height: 0; overflow: auto; padding: 15px 3px; scroll-behavior: smooth; overscroll-behavior: contain; }
+.community-message-list > p { color: #8e899b; text-align: center; }
+.community-bubble { width: fit-content; max-width: 78%; display: grid; gap: 5px; padding: 9px 13px 11px; margin-bottom: 8px; border-radius: 18px 18px 18px 6px; color: #eeeaf7; background: #272343; box-shadow: 0 3px 14px rgba(0,0,0,.14); animation: rise .22s ease-out both; }
+.community-bubble.mine { margin-left: auto; border-radius: 18px 18px 6px 18px; color: #15131d; background: linear-gradient(120deg,#d9ff83,#6df2c1); }
+.community-bubble small { color: #aa9dff; font-size: 9px; font-weight: 800; }
+.community-bubble.mine small { color: #4b5760; }
+.community-bubble img,
+.community-bubble video { display: block; width: min(430px,100%); max-height: 430px; margin: 1px 0 4px; border-radius: 13px; object-fit: cover; background: #080910; }
+.community-chat .friend-compose { grid-template-columns: auto 1fr auto; }
 .friend-bubble.mine {
   margin-left: auto;
   border-radius: 22px 22px 7px 22px;

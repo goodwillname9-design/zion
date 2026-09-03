@@ -1,5 +1,41 @@
 -- Run this once after the main database setup SQL.
 
+-- ZION end-to-end encryption identities. Public ECDH keys are discoverable by
+-- signed-in users; password-wrapped private-key backups are visible only to
+-- their owner. The unwrapped private key never enters Supabase.
+create table if not exists public.e2ee_public_keys (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  public_key jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.e2ee_public_keys enable row level security;
+drop policy if exists "Signed-in users read E2EE public keys" on public.e2ee_public_keys;
+create policy "Signed-in users read E2EE public keys" on public.e2ee_public_keys
+for select to authenticated using (true);
+drop policy if exists "Users create own E2EE public key" on public.e2ee_public_keys;
+create policy "Users create own E2EE public key" on public.e2ee_public_keys
+for insert to authenticated with check (user_id=auth.uid());
+drop policy if exists "Users update own E2EE public key" on public.e2ee_public_keys;
+create policy "Users update own E2EE public key" on public.e2ee_public_keys
+for update to authenticated using (user_id=auth.uid()) with check (user_id=auth.uid());
+
+create table if not exists public.e2ee_key_backups (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  key_backup jsonb not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.e2ee_key_backups enable row level security;
+drop policy if exists "Users read own E2EE key backup" on public.e2ee_key_backups;
+create policy "Users read own E2EE key backup" on public.e2ee_key_backups
+for select to authenticated using (user_id=auth.uid());
+drop policy if exists "Users create own E2EE key backup" on public.e2ee_key_backups;
+create policy "Users create own E2EE key backup" on public.e2ee_key_backups
+for insert to authenticated with check (user_id=auth.uid());
+drop policy if exists "Users update own E2EE key backup" on public.e2ee_key_backups;
+create policy "Users update own E2EE key backup" on public.e2ee_key_backups
+for update to authenticated using (user_id=auth.uid()) with check (user_id=auth.uid());
+
 drop policy if exists "Participants read answers" on public.conversation_answers;
 drop policy if exists "Reveal answers only after own submission" on public.conversation_answers;
 
@@ -67,8 +103,8 @@ begin
     raise exception 'Authentication required';
   end if;
 
-  if char_length(clean_answer) < 3 or char_length(clean_answer) > 280 then
-    raise exception 'Answer must be between 3 and 280 characters';
+  if char_length(clean_answer) < 3 or char_length(clean_answer) > 4096 then
+    raise exception 'Invalid encrypted answer';
   end if;
 
   if not exists (
@@ -129,6 +165,24 @@ $$;
 
 revoke all on function public.mark_conversation_messages_read(uuid) from public;
 grant execute on function public.mark_conversation_messages_read(uuid) to authenticated;
+
+-- Replace legacy plaintext-length checks with room for authenticated
+-- encryption envelopes. The UI still enforces the original plaintext limits.
+do $$
+declare constraint_name text;
+begin
+  for constraint_name in
+    select conname from pg_constraint
+    where conrelid='public.messages'::regclass
+      and contype='c'
+      and pg_get_constraintdef(oid) ilike '%char_length%message%'
+  loop
+    execute format('alter table public.messages drop constraint %I',constraint_name);
+  end loop;
+end $$;
+alter table public.messages drop constraint if exists messages_e2ee_length_check;
+alter table public.messages add constraint messages_e2ee_length_check
+check(char_length(message) between 1 and 8192);
 
 drop policy if exists "Users submit their own answers" on public.conversation_answers;
 create policy "Users submit their own answers"
@@ -398,6 +452,10 @@ create table if not exists public.friend_messages (
   read_at timestamptz,
   check ((message is not null and char_length(message) between 1 and 1000) or media_path is not null)
 );
+-- Encrypted envelopes are larger than their plaintext (IV, tag and Base64).
+alter table public.friend_messages drop constraint if exists friend_messages_check;
+alter table public.friend_messages add constraint friend_messages_check
+check ((message is not null and char_length(message) between 1 and 8192) or media_path is not null);
 alter table public.friend_messages add column if not exists edited_at timestamptz;
 alter table public.friend_messages add column if not exists deleted_at timestamptz;
 alter table public.friend_messages add column if not exists reply_to_id bigint;
@@ -430,7 +488,7 @@ create or replace function public.edit_friend_message(p_message_id bigint,p_mess
 returns void language plpgsql security definer set search_path='' as $$
 declare clean_message text:=btrim(p_message);
 begin
-  if auth.uid() is null or char_length(clean_message)<1 or char_length(clean_message)>1000 then raise exception 'Invalid message'; end if;
+  if auth.uid() is null or char_length(clean_message)<1 or char_length(clean_message)>8192 then raise exception 'Invalid message'; end if;
   update public.friend_messages set message=clean_message,edited_at=now()
   where id=p_message_id and sender_id=auth.uid() and deleted_at is null and media_path is null;
   if not found then raise exception 'Message cannot be edited'; end if;
@@ -454,8 +512,8 @@ alter table public.messages add column if not exists media_type text
 check (media_type is null or media_type in ('image','video'));
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('chat-media','chat-media',false,15728640,array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','video/quicktime'])
-on conflict (id) do update set public=false, file_size_limit=15728640,
+values ('chat-media','chat-media',false,262144000,array['application/octet-stream','image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','video/quicktime'])
+on conflict (id) do update set public=false, file_size_limit=262144000,
 allowed_mime_types=excluded.allowed_mime_types;
 
 drop policy if exists "Authenticated upload chat media" on storage.objects;
@@ -484,6 +542,162 @@ alter table public.profiles add column if not exists show_country boolean not nu
 alter table public.profiles add column if not exists show_online_status boolean not null default true;
 alter table public.profiles add column if not exists avatar_url text;
 alter table public.profiles add column if not exists profile_edit_used boolean not null default false;
+
+-- Followers are separate from mutual friendships. A user may follow or
+-- unfollow another profile without gaining access to private chats.
+create table if not exists public.profile_follows (
+  follower_id uuid not null references auth.users(id) on delete cascade,
+  following_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key(follower_id,following_id),
+  check(follower_id<>following_id)
+);
+alter table public.profile_follows enable row level security;
+drop policy if exists "Signed-in users view follows" on public.profile_follows;
+create policy "Signed-in users view follows" on public.profile_follows
+for select to authenticated using(true);
+drop policy if exists "Users follow profiles" on public.profile_follows;
+create policy "Users follow profiles" on public.profile_follows
+for insert to authenticated with check(follower_id=auth.uid());
+drop policy if exists "Users unfollow profiles" on public.profile_follows;
+create policy "Users unfollow profiles" on public.profile_follows
+for delete to authenticated using(follower_id=auth.uid());
+
+-- End-to-end encrypted communities. Supabase stores ciphertext and a separate
+-- copy of the group key encrypted for each member; it never receives the raw
+-- group key.
+create table if not exists public.communities (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  name text not null check(char_length(name) between 3 and 60),
+  created_at timestamptz not null default now()
+);
+create table if not exists public.community_members (
+  community_id uuid not null references public.communities(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  role text not null default 'member' check(role in ('owner','admin','member')),
+  joined_at timestamptz not null default now(),
+  primary key(community_id,user_id)
+);
+create or replace function public.is_community_member(p_community_id uuid,p_user_id uuid)
+returns boolean language sql stable security definer set search_path='' as $$
+  select exists(select 1 from public.community_members m where m.community_id=p_community_id and m.user_id=p_user_id)
+$$;
+revoke all on function public.is_community_member(uuid,uuid) from public;
+grant execute on function public.is_community_member(uuid,uuid) to authenticated;
+create or replace function public.is_community_owner(p_community_id uuid,p_user_id uuid)
+returns boolean language sql stable security definer set search_path='' as $$
+  select exists(select 1 from public.communities c where c.id=p_community_id and c.owner_id=p_user_id)
+$$;
+revoke all on function public.is_community_owner(uuid,uuid) from public;
+grant execute on function public.is_community_owner(uuid,uuid) to authenticated;
+
+create or replace function public.create_zion_community(p_name text)
+returns uuid language plpgsql security definer set search_path='' as $$
+declare new_id uuid; clean_name text:=btrim(p_name);
+begin
+  if auth.uid() is null or char_length(clean_name)<3 or char_length(clean_name)>60 then raise exception 'Invalid community name'; end if;
+  insert into public.communities(owner_id,name) values(auth.uid(),clean_name) returning id into new_id;
+  insert into public.community_members(community_id,user_id,role) values(new_id,auth.uid(),'owner');
+  return new_id;
+end $$;
+revoke all on function public.create_zion_community(text) from public;
+grant execute on function public.create_zion_community(text) to authenticated;
+
+alter table public.communities enable row level security;
+drop policy if exists "Members view communities" on public.communities;
+create policy "Members view communities" on public.communities for select to authenticated
+using(public.is_community_member(id,auth.uid()));
+drop policy if exists "Users create communities" on public.communities;
+create policy "Users create communities" on public.communities for insert to authenticated
+with check(owner_id=auth.uid());
+
+alter table public.community_members enable row level security;
+drop policy if exists "Members view community members" on public.community_members;
+create policy "Members view community members" on public.community_members for select to authenticated
+using(public.is_community_member(community_id,auth.uid()));
+drop policy if exists "Owners add community members" on public.community_members;
+create policy "Owners add community members" on public.community_members for insert to authenticated
+with check(public.is_community_owner(community_id,auth.uid()));
+
+create table if not exists public.community_member_keys (
+  community_id uuid not null references public.communities(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  wrapped_by uuid not null references auth.users(id) on delete cascade,
+  key_version integer not null default 1,
+  encrypted_key text not null,
+  created_at timestamptz not null default now(),
+  primary key(community_id,user_id,key_version)
+);
+alter table public.community_member_keys enable row level security;
+drop policy if exists "Members read own community key" on public.community_member_keys;
+create policy "Members read own community key" on public.community_member_keys for select to authenticated
+using(user_id=auth.uid() and public.is_community_member(community_id,auth.uid()));
+drop policy if exists "Owners distribute community keys" on public.community_member_keys;
+create policy "Owners distribute community keys" on public.community_member_keys for insert to authenticated
+with check(wrapped_by=auth.uid() and public.is_community_owner(community_id,auth.uid()));
+
+create table if not exists public.community_messages (
+  id bigint generated by default as identity primary key,
+  community_id uuid not null references public.communities(id) on delete cascade,
+  sender_id uuid not null references auth.users(id) on delete cascade,
+  ciphertext text not null check(char_length(ciphertext) between 1 and 16384),
+  media_path text,
+  media_type text check(media_type is null or media_type in ('image','video')),
+  key_version integer not null default 1,
+  created_at timestamptz not null default now()
+);
+alter table public.community_messages add column if not exists media_path text;
+alter table public.community_messages add column if not exists media_type text
+check(media_type is null or media_type in ('image','video'));
+alter table public.community_messages enable row level security;
+drop policy if exists "Members read community ciphertext" on public.community_messages;
+create policy "Members read community ciphertext" on public.community_messages for select to authenticated
+using(public.is_community_member(community_id,auth.uid()));
+drop policy if exists "Members send community ciphertext" on public.community_messages;
+create policy "Members send community ciphertext" on public.community_messages for insert to authenticated
+with check(sender_id=auth.uid() and public.is_community_member(community_id,auth.uid()));
+
+drop policy if exists "Community members upload encrypted media" on storage.objects;
+create policy "Community members upload encrypted media" on storage.objects
+for insert to authenticated with check(
+  bucket_id='chat-media'
+  and (storage.foldername(name))[1]='community'
+  and (storage.foldername(name))[3]=auth.uid()::text
+  and public.is_community_member(((storage.foldername(name))[2])::uuid,auth.uid())
+);
+drop policy if exists "Community members read encrypted media" on storage.objects;
+create policy "Community members read encrypted media" on storage.objects
+for select to authenticated using(
+  bucket_id='chat-media'
+  and (storage.foldername(name))[1]='community'
+  and public.is_community_member(((storage.foldername(name))[2])::uuid,auth.uid())
+);
+
+-- Private Broadcast/Presence authorization for random rooms and friend calls.
+-- Keep every client channel configured with private:true.
+drop policy if exists "ZION participants receive private realtime" on realtime.messages;
+create policy "ZION participants receive private realtime" on realtime.messages
+for select to authenticated using (
+  case
+    when realtime.topic() ~ '^friend-live-[0-9a-f-]{36}$' then
+      public.is_friendship_member(substring(realtime.topic() from 13)::uuid,auth.uid())
+    when realtime.topic() ~ '^random-room-[0-9a-f-]{36}$' then
+      public.is_conversation_participant(substring(realtime.topic() from 13)::uuid,auth.uid())
+    else false
+  end
+);
+drop policy if exists "ZION participants send private realtime" on realtime.messages;
+create policy "ZION participants send private realtime" on realtime.messages
+for insert to authenticated with check (
+  case
+    when realtime.topic() ~ '^friend-live-[0-9a-f-]{36}$' then
+      public.is_friendship_member(substring(realtime.topic() from 13)::uuid,auth.uid())
+    when realtime.topic() ~ '^random-room-[0-9a-f-]{36}$' then
+      public.is_conversation_participant(substring(realtime.topic() from 13)::uuid,auth.uid())
+    else false
+  end
+);
 
 create or replace function public.enforce_profile_edit_once()
 returns trigger language plpgsql set search_path='' as $$

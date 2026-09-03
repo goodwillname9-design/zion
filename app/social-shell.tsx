@@ -37,8 +37,23 @@ import type { RealtimeChannel, User } from "@supabase/supabase-js";
 
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
+import {
+  decryptFile,
+  decryptGroupText,
+  decryptGroupFile,
+  decryptText,
+  encryptFile,
+  encryptGroupText,
+  encryptGroupFile,
+  encryptText,
+  ensureE2EEIdentity,
+  createGroupSecret,
+  hasLocalE2EEIdentity,
+  isE2EEEnvelope,
+} from "@/lib/e2ee";
 import { Experience, type ZionProfile } from "./experience";
 import { countryLabel, countryOptions } from "./countries";
+import { uploadResumable } from "@/lib/resumable-upload";
 
 type Friendship = {
   id: string;
@@ -46,6 +61,7 @@ type Friendship = {
   addressee_id: string;
   status: "pending" | "accepted" | "declined";
   created_at: string;
+  accepted_at?: string | null;
   streak_count: number;
   last_streak_date: string | null;
 };
@@ -62,6 +78,8 @@ type FriendMessage = {
   deleted_at: string | null;
   reply_to_id: number | null;
   media_url?: string;
+  display_message?: string | null;
+  encrypted?: boolean;
 };
 const avatars = ["👨🏽", "👨🏻‍🦱", "👨🏿‍🦲", "🧔🏼", "👩🏽", "👩🏻‍🦱", "👩🏿", "👱🏼‍♀️", "🧑🏾", "🧑🏻‍🦰"];
 const streakBadge = (count: number) =>
@@ -120,9 +138,13 @@ function ProfileAvatar({
 function ProfileDetails({
   profile,
   label = "ZION Profile",
+  followerCount = 0,
+  followingCount = 0,
 }: {
   profile: ZionProfile;
   label?: string;
+  followerCount?: number;
+  followingCount?: number;
 }) {
   const joined = profile.created_at
     ? new Intl.DateTimeFormat(undefined, { dateStyle: "long" }).format(
@@ -138,6 +160,10 @@ function ProfileDetails({
         <span className="admin-profile-badge">ADMIN · ZION OWNER</span>
       ) : null}
       <p className="profile-handle">@{profile.username}</p>
+      <div className="profile-social-counts">
+        <span><b>{followerCount}</b><small>Followers</small></span>
+        <span><b>{followingCount}</b><small>Following</small></span>
+      </div>
       <div className="profile-facts">
         <div>
           <b>{countryLabel(profile.country)}</b>
@@ -168,6 +194,9 @@ export function SocialShell() {
   const [notificationPrompt, setNotificationPrompt] = useState(false);
   const [notificationToast, setNotificationToast] = useState("");
   const [openingIntro, setOpeningIntro] = useState(true);
+  const [encryptionState, setEncryptionState] = useState<
+    "idle" | "checking" | "ready" | "locked"
+  >("idle");
   useEffect(() => {
     document.documentElement.dataset.theme =
       localStorage.getItem("zion-theme") === "day" ? "day" : "dark";
@@ -177,8 +206,10 @@ export function SocialShell() {
     if (!nextUser || !supabase) {
       setProfile(null);
       setLoading(false);
+      setEncryptionState("idle");
       return;
     }
+    setEncryptionState("checking");
     const { data } = await supabase
       .from("profiles")
       .select(
@@ -188,7 +219,16 @@ export function SocialShell() {
       .maybeSingle();
     setProfile((data as ZionProfile | null) ?? null);
     if (data?.username) rememberDeviceAccount(data.username);
+    setEncryptionState(
+      (await hasLocalE2EEIdentity(nextUser.id)) ? "ready" : "locked",
+    );
     setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    const ready = () => setEncryptionState("ready");
+    window.addEventListener("zion-e2ee-ready", ready);
+    return () => window.removeEventListener("zion-e2ee-ready", ready);
   }, []);
 
   useEffect(() => {
@@ -277,12 +317,21 @@ export function SocialShell() {
 
   if (openingIntro)
     return <OpeningIntro onEnter={() => setOpeningIntro(false)} />;
-  if (loading) return <AuthScreen title="Opening ZION…" />;
+  if (loading || encryptionState === "checking")
+    return <AuthScreen title="Opening ZION…" />;
   if (!supabase)
     return <AuthScreen title="ZION needs Supabase configuration." />;
   if (!user) return <LoginScreen setError={setError} error={error} />;
   if (!profile) return <ProfileSetup user={user} onSaved={setProfile} />;
   if (profile.is_banned) return <BanScreen reason={profile.ban_reason} />;
+  if (encryptionState === "locked")
+    return (
+      <EncryptionUnlock
+        user={user}
+        username={profile.username}
+        onUnlocked={() => setEncryptionState("ready")}
+      />
+    );
 
   return (
     <>
@@ -453,14 +502,32 @@ function LoginScreen({
         setError(
           "Disable Confirm email in Supabase Authentication settings, then try again.",
         );
-      else rememberDeviceAccount(username.trim());
+      else {
+        try {
+          await ensureE2EEIdentity(data.user!.id, password);
+          rememberDeviceAccount(username.trim());
+          window.dispatchEvent(new Event("zion-e2ee-ready"));
+        } catch (problem) {
+          await supabase.auth.signOut();
+          setError(problem instanceof Error ? problem.message : "Encryption setup failed.");
+        }
+      }
     } else {
-      const { error: loginError } = await supabase.auth.signInWithPassword({
+      const { data, error: loginError } = await supabase.auth.signInWithPassword({
         email: authEmail,
         password,
       });
       if (loginError) setError("Incorrect username or password.");
-      else rememberDeviceAccount(username.trim());
+      else {
+        try {
+          await ensureE2EEIdentity(data.user.id, password);
+          rememberDeviceAccount(username.trim());
+          window.dispatchEvent(new Event("zion-e2ee-ready"));
+        } catch (problem) {
+          await supabase.auth.signOut();
+          setError(problem instanceof Error ? problem.message : "Encryption setup failed.");
+        }
+      }
     }
     setAccountBusy(false);
   };
@@ -534,6 +601,55 @@ function LoginScreen({
         <small>
           18+ only · Gender is self-declared, not identity-verified.
         </small>
+      </section>
+    </main>
+  );
+}
+
+function EncryptionUnlock({
+  user,
+  username,
+  onUnlocked,
+}: {
+  user: User;
+  username: string;
+  onUnlocked: () => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const unlock = async () => {
+    if (password.length < 6) return;
+    setBusy(true);
+    setError("");
+    try {
+      await ensureE2EEIdentity(user.id, password);
+      onUnlocked();
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : "Unlock failed.");
+    }
+    setBusy(false);
+  };
+  return (
+    <main className="auth-shell">
+      <section className="auth-card login-card">
+        <div className="auth-logo">🔒</div>
+        <span className="mini-label">END-TO-END ENCRYPTION</span>
+        <h1>Unlock your private chats.</h1>
+        <p>Enter the password for @{username}. It never leaves this device.</p>
+        {error ? <p className="error-note">{error}</p> : null}
+        <input
+          className="account-input"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          onKeyDown={(event) => event.key === "Enter" && void unlock()}
+          placeholder="Account password"
+          autoFocus
+        />
+        <Button disabled={busy || password.length < 6} onClick={() => void unlock()}>
+          {busy ? "Unlocking…" : "Unlock encrypted chats"}
+        </Button>
       </section>
     </main>
   );
@@ -827,7 +943,7 @@ function FriendsPanel({
   const [selected, setSelected] = useState<Friendship | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "friends" | "notifications" | "find" | "profile" | "admin"
+    "friends" | "notifications" | "find" | "profile" | "communities" | "admin"
   >("friends");
   const [searchName, setSearchName] = useState("");
   const [searching, setSearching] = useState(false);
@@ -847,14 +963,16 @@ function FriendsPanel({
   const [showOnline, setShowOnline] = useState(true);
   const [editUsername, setEditUsername] = useState(profile.username);
   const [editCountry, setEditCountry] = useState(profile.country);
+  const [followingIds, setFollowingIds] = useState<string[]>([]);
+  const [socialCounts, setSocialCounts] = useState({ followers: 0, following: 0 });
   const load = useCallback(async () => {
     if (!supabase) return;
-    const [{ data: rows }, { data: pinRows }, { data: privacy }] =
+    const [{ data: rows }, { data: pinRows }, { data: privacy }, { data: followingRows }, followerCount, followingCount] =
       await Promise.all([
         supabase
           .from("friendships")
           .select(
-            "id,requester_id,addressee_id,status,created_at,streak_count,last_streak_date",
+            "id,requester_id,addressee_id,status,created_at,accepted_at,streak_count,last_streak_date",
           )
           .order("created_at", { ascending: false }),
         supabase.from("friend_pins").select("friend_id").eq("user_id", user.id),
@@ -863,10 +981,15 @@ function FriendsPanel({
           .select("allow_audio_calls,show_country,show_online_status")
           .eq("id", user.id)
           .single(),
+        supabase.from("profile_follows").select("following_id").eq("follower_id", user.id),
+        supabase.from("profile_follows").select("follower_id", { count: "exact", head: true }).eq("following_id", user.id),
+        supabase.from("profile_follows").select("following_id", { count: "exact", head: true }).eq("follower_id", user.id),
       ]);
     const list = (rows as Friendship[] | null) ?? [];
     setFriendships(list);
     setPins((pinRows ?? []).map((item) => item.friend_id));
+    setFollowingIds((followingRows ?? []).map((item) => item.following_id));
+    setSocialCounts({ followers: followerCount.count ?? 0, following: followingCount.count ?? 0 });
     if (privacy) {
       setAllowCalls(privacy.allow_audio_calls);
       setShowCountry(privacy.show_country);
@@ -898,8 +1021,11 @@ function FriendsPanel({
     const timer = window.setInterval(() => void load(), 2500);
     return () => window.clearInterval(timer);
   }, [load]);
-  const otherId = (item: Friendship) =>
-    item.requester_id === user.id ? item.addressee_id : item.requester_id;
+  const otherId = useCallback(
+    (item: Friendship) =>
+      item.requester_id === user.id ? item.addressee_id : item.requester_id,
+    [user.id],
+  );
   const accept = async (item: Friendship) => {
     if (!supabase) return;
     await supabase
@@ -944,11 +1070,18 @@ function FriendsPanel({
       friendships
         .filter((item) => item.status === "accepted")
         .sort(
-          (a, b) =>
-            Number(pins.includes(otherId(b))) -
-            Number(pins.includes(otherId(a))),
+          (a, b) => {
+            const pinOrder =
+              Number(pins.includes(otherId(b))) -
+              Number(pins.includes(otherId(a)));
+            if (pinOrder) return pinOrder;
+            return (
+              new Date(b.accepted_at ?? b.created_at).getTime() -
+              new Date(a.accepted_at ?? a.created_at).getTime()
+            );
+          },
         ),
-    [friendships, pins],
+    [friendships, otherId, pins],
   );
   const pendingRequests = useMemo(
     () =>
@@ -994,7 +1127,7 @@ function FriendsPanel({
       return;
     }
     if (profile.profile_edit_used) return;
-    const { data, error } = await supabase.rpc("update_profile_once", {
+    const { error } = await supabase.rpc("update_profile_once", {
       p_username: editUsername.trim(),
       p_country: editCountry,
     });
@@ -1038,6 +1171,14 @@ function FriendsPanel({
       });
       await load();
     }
+  };
+  const toggleFollow = async (profileId: string) => {
+    if (!supabase || profileId === user.id) return;
+    if (followingIds.includes(profileId))
+      await supabase.from("profile_follows").delete().eq("follower_id", user.id).eq("following_id", profileId);
+    else
+      await supabase.from("profile_follows").insert({ follower_id: user.id, following_id: profileId });
+    await load();
   };
   const uploadProfilePhoto = async (file?: File) => {
     if (!supabase || !file) return;
@@ -1301,6 +1442,12 @@ function FriendsPanel({
             <UserRound /> My Profile
           </button>
           <button
+            className={activeTab === "communities" ? "active" : ""}
+            onClick={() => setActiveTab("communities")}
+          >
+            <Users /> Communities
+          </button>
+          <button
             className="meeting-tab"
             onClick={() => {
               window.location.href = "/meeting";
@@ -1311,6 +1458,11 @@ function FriendsPanel({
         </div>
         {activeTab === "admin" ? (
           <AdminPanel user={user} />
+        ) : activeTab === "communities" ? (
+          <CommunityPanel
+            user={user}
+            friends={accepted.map((item) => profiles[otherId(item)]).filter(Boolean)}
+          />
         ) : activeTab === "notifications" ? (
           <div className="notification-center">
             <h2>
@@ -1349,7 +1501,12 @@ function FriendsPanel({
             )}
           </div>
         ) : activeTab === "profile" ? (
-          <ProfileDetails profile={profile} label="My ZION Profile" />
+          <ProfileDetails
+            profile={profile}
+            label="My ZION Profile"
+            followerCount={socialCounts.followers}
+            followingCount={socialCounts.following}
+          />
         ) : activeTab === "find" ? (
           <div className="find-friends">
             <h2>Find Friends</h2>
@@ -1394,6 +1551,12 @@ function FriendsPanel({
                     : searchResult.friend_status === "pending"
                       ? "Requested"
                       : "Add Friend"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => void toggleFollow(searchResult.id)}
+                >
+                  {followingIds.includes(searchResult.id) ? "Following" : "Follow"}
                 </Button>
               </div>
             ) : null}
@@ -1485,6 +1648,329 @@ function FriendsPanel({
           </>
         )}
       </section>
+    </div>
+  );
+}
+
+type Community = {
+  id: string;
+  owner_id: string;
+  name: string;
+  created_at: string;
+};
+type CommunityMessage = {
+  id: number;
+  community_id: string;
+  sender_id: string;
+  ciphertext: string;
+  created_at: string;
+  media_path?: string | null;
+  media_type?: "image" | "video" | null;
+  media_url?: string;
+  display_message?: string;
+};
+
+function CommunityPanel({ user, friends }: { user: User; friends: ZionProfile[] }) {
+  const [communities, setCommunities] = useState<Community[]>([]);
+  const [selected, setSelected] = useState<Community | null>(null);
+  const [messages, setMessages] = useState<CommunityMessage[]>([]);
+  const [secret, setSecret] = useState("");
+  const [text, setText] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const [memberIds, setMemberIds] = useState<string[]>([]);
+  const [error, setError] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const communityFileRef = useRef<HTMLInputElement>(null);
+  const communityMediaUrls = useRef(new Map<string, string>());
+  useEffect(() => {
+    const urls = communityMediaUrls.current;
+    return () => {
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      urls.clear();
+    };
+  }, []);
+
+  const loadCommunities = useCallback(async () => {
+    if (!supabase) return;
+    const { data: memberships } = await supabase
+      .from("community_members")
+      .select("community_id")
+      .eq("user_id", user.id);
+    const ids = (memberships ?? []).map((item) => item.community_id);
+    if (!ids.length) {
+      setCommunities([]);
+      return;
+    }
+    const { data } = await supabase
+      .from("communities")
+      .select("id,owner_id,name,created_at")
+      .in("id", ids)
+      .order("created_at", { ascending: false });
+    setCommunities((data as Community[] | null) ?? []);
+  }, [user.id]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadCommunities(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadCommunities]);
+
+  const openCommunity = async (community: Community) => {
+    if (!supabase) return;
+    setError("");
+    const { data, error: keyError } = await supabase
+      .from("community_member_keys")
+      .select("encrypted_key,wrapped_by,key_version")
+      .eq("community_id", community.id)
+      .eq("user_id", user.id)
+      .single();
+    if (keyError || !data) {
+      setError("This community encryption key is not available.");
+      return;
+    }
+    const value = await decryptText(
+      data.encrypted_key,
+      user.id,
+      data.wrapped_by,
+      `community-key:${community.id}:${data.key_version}`,
+    );
+    if (!value || value.startsWith("🔒")) {
+      setError(value ?? "Unable to unlock this community.");
+      return;
+    }
+    setSecret(value);
+    setSelected(community);
+  };
+
+  const loadMessages = useCallback(async () => {
+    if (!supabase || !selected || !secret) return;
+    const { data } = await supabase
+      .from("community_messages")
+      .select("id,community_id,sender_id,ciphertext,created_at,media_path,media_type")
+      .eq("community_id", selected.id)
+      .order("created_at")
+      .limit(300);
+    const decrypted = await Promise.all(
+      ((data as CommunityMessage[] | null) ?? []).map(async (item) => {
+        const plaintext = await decryptGroupText(
+          item.ciphertext,
+          secret,
+          `community:${selected.id}:1`,
+        );
+        if (!item.media_path) return { ...item, display_message: plaintext };
+        const cached = communityMediaUrls.current.get(item.media_path);
+        if (cached) return { ...item, display_message: "", media_url: cached };
+        try {
+          const metadata = JSON.parse(plaintext) as { mime: string };
+          const { data: signed } = await supabase!.storage
+            .from("chat-media")
+            .createSignedUrl(item.media_path, 3600);
+          if (!signed?.signedUrl) throw new Error("Missing media URL");
+          const response = await fetch(signed.signedUrl);
+          const blob = await decryptGroupFile(
+            await response.arrayBuffer(),
+            metadata.mime,
+            secret,
+            `community:${selected.id}:1`,
+          );
+          const url = URL.createObjectURL(blob);
+          communityMediaUrls.current.set(item.media_path, url);
+          return { ...item, display_message: "", media_url: url };
+        } catch {
+          return { ...item, display_message: "🔒 Unable to open attachment" };
+        }
+      }),
+    );
+    setMessages(decrypted);
+  }, [secret, selected]);
+
+  useEffect(() => {
+    if (!selected || !secret) return;
+    const first = window.setTimeout(() => void loadMessages(), 0);
+    const timer = window.setInterval(() => void loadMessages(), 1500);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+    };
+  }, [loadMessages, secret, selected]);
+
+  const createCommunity = async () => {
+    if (!supabase || name.trim().length < 3) return;
+    setError("");
+    const cleanName = name.trim().slice(0, 60);
+    const { data: communityId, error: createError } = await supabase.rpc(
+      "create_zion_community",
+      { p_name: cleanName },
+    );
+    if (createError || !communityId) {
+      setError(createError?.message ?? "Community creation failed.");
+      return;
+    }
+    const community: Community = {
+      id: communityId as string,
+      owner_id: user.id,
+      name: cleanName,
+      created_at: new Date().toISOString(),
+    };
+    try {
+      const groupSecret = createGroupSecret();
+      const members = [user.id, ...memberIds];
+      if (memberIds.length) {
+        const { error: memberError } = await supabase.from("community_members").insert(
+          memberIds.map((id) => ({
+            community_id: community.id,
+            user_id: id,
+            role: "member",
+          })),
+        );
+        if (memberError) throw memberError;
+      }
+      const wrapped = await Promise.all(
+        members.map(async (id) => ({
+          community_id: community.id,
+          user_id: id,
+          wrapped_by: user.id,
+          key_version: 1,
+          encrypted_key: await encryptText(
+            groupSecret,
+            user.id,
+            id,
+            `community-key:${community.id}:1`,
+          ),
+        })),
+      );
+      const { error: keyError } = await supabase
+        .from("community_member_keys")
+        .insert(wrapped);
+      if (keyError) throw keyError;
+      setName("");
+      setMemberIds([]);
+      setCreating(false);
+      await loadCommunities();
+      await openCommunity(community);
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : "Secure group setup failed.");
+    }
+  };
+
+  const sendCommunityMessage = async () => {
+    if (!supabase || !selected || !secret || !text.trim()) return;
+    const value = text.trim();
+    const ciphertext = await encryptGroupText(
+      value,
+      secret,
+      `community:${selected.id}:1`,
+    );
+    const { error: sendError } = await supabase.from("community_messages").insert({
+      community_id: selected.id,
+      sender_id: user.id,
+      ciphertext,
+      key_version: 1,
+    });
+    if (sendError) setError(sendError.message);
+    else {
+      setText("");
+      await loadMessages();
+    }
+  };
+
+  const uploadCommunityMedia = async (file?: File) => {
+    if (!supabase || !selected || !secret || !file) return;
+    const mediaType = file.type.startsWith("image/")
+      ? "image"
+      : file.type.startsWith("video/")
+        ? "video"
+        : null;
+    if (!mediaType) {
+      setError("Choose a photo or video.");
+      return;
+    }
+    if (file.size > 250 * 1024 * 1024) {
+      setError("Maximum encrypted community media size is 250 MB.");
+      return;
+    }
+    setError("");
+    setUploadProgress(0);
+    try {
+      const context = `community:${selected.id}:1`;
+      const encrypted = await encryptGroupFile(file, secret, context);
+      const metadata = await encryptGroupText(
+        JSON.stringify({ mime: file.type, name: file.name, size: file.size }),
+        secret,
+        context,
+      );
+      const path = `community/${selected.id}/${user.id}/${crypto.randomUUID()}.e2ee`;
+      await uploadResumable({
+        bucket: "chat-media",
+        path,
+        body: encrypted,
+        contentType: "application/octet-stream",
+        onProgress: setUploadProgress,
+      });
+      const { error: messageError } = await supabase.from("community_messages").insert({
+        community_id: selected.id,
+        sender_id: user.id,
+        ciphertext: metadata,
+        media_path: path,
+        media_type: mediaType,
+        key_version: 1,
+      });
+      if (messageError) throw messageError;
+      await loadMessages();
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : "Media upload failed.");
+    }
+    setUploadProgress(null);
+    if (communityFileRef.current) communityFileRef.current.value = "";
+  };
+
+  if (selected)
+    return (
+      <div className="community-chat">
+        <div className="community-chat-head">
+          <button onClick={() => { setSelected(null); setSecret(""); }}><ArrowLeft /></button>
+          <div><b>{selected.name}</b><small>🔒 End-to-end encrypted group</small></div>
+        </div>
+        <div className="community-message-list">
+          {messages.map((item) => (
+            <div key={item.id} className={item.sender_id === user.id ? "community-bubble mine" : "community-bubble"}>
+              <small>{item.sender_id === user.id ? "You" : (friends.find((friend) => friend.id === item.sender_id)?.username ?? "Member")}</small>
+              {item.media_url && item.media_type === "image" ? <img src={item.media_url} alt="Encrypted community attachment" loading="lazy" /> : null}
+              {item.media_url && item.media_type === "video" ? <video src={item.media_url} controls playsInline preload="metadata" /> : null}
+              <span>{item.display_message}</span>
+            </div>
+          ))}
+          {!messages.length ? <p>Start this private community conversation.</p> : null}
+        </div>
+        <div className="friend-compose">
+          <input ref={communityFileRef} hidden type="file" accept="image/*,video/*" onChange={(event) => void uploadCommunityMedia(event.target.files?.[0])} />
+          <button className="media-button" onClick={() => communityFileRef.current?.click()} disabled={uploadProgress !== null}><ImagePlus /><span>{uploadProgress === null ? "Gallery" : `${uploadProgress}%`}</span></button>
+          <input value={text} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void sendCommunityMessage()} placeholder="Message community…" maxLength={2000} />
+          <button className="send-button" onClick={() => void sendCommunityMessage()} disabled={!text.trim()}><Send /></button>
+        </div>
+      </div>
+    );
+
+  return (
+    <div className="community-panel">
+      <div className="community-title"><div><span className="mini-label">ZION COMMUNITIES</span><h2>Private group chats</h2></div><button onClick={() => setCreating((value) => !value)}>{creating ? "Cancel" : "+ Create"}</button></div>
+      {error ? <p className="error-note">{error}</p> : null}
+      {creating ? (
+        <div className="community-create">
+          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Community name" maxLength={60} />
+          <b>Add trusted friends</b>
+          <div className="community-member-picker">
+            {friends.map((friend) => (
+              <label key={friend.id}><input type="checkbox" checked={memberIds.includes(friend.id)} onChange={(event) => setMemberIds((current) => event.target.checked ? [...current, friend.id] : current.filter((id) => id !== friend.id))} /><ProfileAvatar profile={friend} /><span>{friend.username}</span></label>
+            ))}
+          </div>
+          <Button className="primary-action" disabled={name.trim().length < 3} onClick={() => void createCommunity()}>Create encrypted community</Button>
+        </div>
+      ) : null}
+      <div className="community-list">
+        {communities.map((community) => <button key={community.id} onClick={() => void openCommunity(community)}><span>👥</span><div><b>{community.name}</b><small>Encrypted community</small></div><ArrowRight /></button>)}
+        {!communities.length && !creating ? <div className="empty-friends"><Users /><p>Create a community and add trusted friends.</p></div> : null}
+      </div>
     </div>
   );
 }
@@ -1593,9 +2079,11 @@ function FriendChat({
   user: User;
   onBack: () => void;
 }) {
+  const friendId = friend?.id ?? "";
   const [messages, setMessages] = useState<FriendMessage[]>([]);
   const [text, setText] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [friendUploadProgress, setFriendUploadProgress] = useState(0);
   const [friendOnline, setFriendOnline] = useState(false);
   const [friendTyping, setFriendTyping] = useState(false);
   const [replyTo, setReplyTo] = useState<FriendMessage | null>(null);
@@ -1621,8 +2109,9 @@ function FriendChat({
   const remoteTypingRef = useRef<number | null>(null);
   const callTimeoutRef = useRef<number | null>(null);
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
+  const mediaUrlsRef = useRef(new Map<string, string>());
   const load = useCallback(async () => {
-    if (!supabase) return;
+    if (!supabase || !friendId) return;
     await supabase.rpc("mark_friend_messages_read", {
       p_friendship_id: friendship.id,
     });
@@ -1636,15 +2125,53 @@ function FriendChat({
     const rows = (data as FriendMessage[] | null) ?? [];
     const withUrls = await Promise.all(
       rows.map(async (item) => {
-        if (!item.media_path) return item;
+        const encrypted = isE2EEEnvelope(item.message);
+        const decrypted = await decryptText(
+          item.message,
+          user.id,
+          friendId,
+          `friend:${friendship.id}`,
+        );
+        if (!item.media_path)
+          return { ...item, display_message: decrypted, encrypted };
+        const cachedUrl = mediaUrlsRef.current.get(item.media_path);
+        if (cachedUrl)
+          return {
+            ...item,
+            display_message: null,
+            media_url: cachedUrl,
+            encrypted,
+          };
         const { data: signed } = await supabase!.storage
           .from("chat-media")
           .createSignedUrl(item.media_path, 3600);
-        return { ...item, media_url: signed?.signedUrl };
+        if (!signed?.signedUrl) return { ...item, display_message: null, encrypted };
+        if (!encrypted)
+          return { ...item, display_message: null, media_url: signed.signedUrl };
+        try {
+          const metadata = JSON.parse(decrypted ?? "{}") as { mime?: string };
+          const response = await fetch(signed.signedUrl);
+          const blob = await decryptFile(
+            await response.arrayBuffer(),
+            metadata.mime ?? "application/octet-stream",
+            user.id,
+            friendId,
+            `friend:${friendship.id}`,
+          );
+          const url = URL.createObjectURL(blob);
+          mediaUrlsRef.current.set(item.media_path, url);
+          return { ...item, display_message: null, media_url: url, encrypted };
+        } catch {
+          return {
+            ...item,
+            display_message: "🔒 Unable to decrypt this attachment",
+            encrypted,
+          };
+        }
       }),
     );
     setMessages(withUrls);
-  }, [friendship.id]);
+  }, [friendId, friendship.id, user.id]);
   const stopCall = useCallback(
     (notify = true) => {
       if (notify)
@@ -1763,15 +2290,16 @@ function FriendChat({
     });
   }, [messages]);
   useEffect(() => {
-    if (!supabase || !friend?.id) return;
+    if (!supabase || !friendId) return;
     const client = supabase;
+    const mediaUrls = mediaUrlsRef.current;
     const channel = client
       .channel(`friend-live-${friendship.id}`, {
-        config: { presence: { key: user.id } },
+        config: { private: true, presence: { key: user.id } },
       })
       .on("presence", { event: "sync" }, () => {
         const presence = channel.presenceState();
-        setFriendOnline(Boolean(presence[friend.id]));
+        setFriendOnline(Boolean(presence[friendId]));
       })
       .on("broadcast", { event: "typing" }, ({ payload }) => {
         if (payload.userId === user.id) return;
@@ -1871,8 +2399,10 @@ function FriendChat({
       stopCall(false);
       void client.removeChannel(channel);
       liveRef.current = null;
+      mediaUrls.forEach((url) => URL.revokeObjectURL(url));
+      mediaUrls.clear();
     };
-  }, [ensurePeer, friend?.id, friendship.id, stopCall, user.id]);
+  }, [ensurePeer, friendId, friendship.id, stopCall, user.id]);
   const announceTyping = (typing: boolean) => {
     void liveRef.current?.send({
       type: "broadcast",
@@ -1890,23 +2420,34 @@ function FriendChat({
     );
   };
   const send = async () => {
-    if (!supabase || !text.trim()) return;
+    if (!supabase || !text.trim() || !friendId) return;
     const value = text.trim();
-    setText("");
-    announceTyping(false);
-    await supabase.from("friend_messages").insert({
-      friendship_id: friendship.id,
-      sender_id: user.id,
-      message: value,
-      reply_to_id: replyTo?.id ?? null,
-    });
-    setReplyTo(null);
-    await load();
+    try {
+      const encrypted = await encryptText(
+        value,
+        user.id,
+        friendId,
+        `friend:${friendship.id}`,
+      );
+      const { error } = await supabase.from("friend_messages").insert({
+        friendship_id: friendship.id,
+        sender_id: user.id,
+        message: encrypted,
+        reply_to_id: replyTo?.id ?? null,
+      });
+      if (error) throw error;
+      setText("");
+      announceTyping(false);
+      setReplyTo(null);
+      await load();
+    } catch (problem) {
+      alert(problem instanceof Error ? problem.message : "Encrypted message failed.");
+    }
   };
   const upload = async (file?: File) => {
-    if (!supabase || !file) return;
-    if (file.size > 15 * 1024 * 1024) {
-      alert("Maximum file size is 15 MB.");
+    if (!supabase || !file || !friendId) return;
+    if (file.size > 250 * 1024 * 1024) {
+      alert("Maximum encrypted media size is 250 MB.");
       return;
     }
     const mediaType = file.type.startsWith("image/")
@@ -1919,32 +2460,58 @@ function FriendChat({
       return;
     }
     setUploading(true);
-    const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
-    const path = `friend/${friendship.id}/${user.id}/${crypto.randomUUID()}-${safe}`;
-    const { error } = await supabase.storage
-      .from("chat-media")
-      .upload(path, file, { contentType: file.type });
-    if (!error)
-      await supabase.from("friend_messages").insert({
+    setFriendUploadProgress(0);
+    try {
+      const context = `friend:${friendship.id}`;
+      const [encryptedFile, encryptedMetadata] = await Promise.all([
+        encryptFile(file, user.id, friendId, context),
+        encryptText(
+          JSON.stringify({ kind: "media", mime: file.type, name: file.name }),
+          user.id,
+          friendId,
+          context,
+        ),
+      ]);
+      const path = `friend/${friendship.id}/${user.id}/${crypto.randomUUID()}.e2ee`;
+      await uploadResumable({
+        bucket: "chat-media",
+        path,
+        body: encryptedFile,
+        contentType: "application/octet-stream",
+        onProgress: setFriendUploadProgress,
+      });
+      const { error: messageError } = await supabase.from("friend_messages").insert({
         friendship_id: friendship.id,
         sender_id: user.id,
+        message: encryptedMetadata,
         media_path: path,
         media_type: mediaType,
         reply_to_id: replyTo?.id ?? null,
       });
-    else alert(error.message);
+      if (messageError) throw messageError;
+    } catch (problem) {
+      alert(problem instanceof Error ? problem.message : "Encrypted upload failed.");
+    }
     setUploading(false);
+    setFriendUploadProgress(0);
     setReplyTo(null);
     await load();
   };
   const editMessage = async (item: FriendMessage) => {
-    if (!supabase || !item.message || item.deleted_at || item.media_path)
+    if (!supabase || !friendId || !item.message || item.deleted_at || item.media_path)
       return;
-    const next = window.prompt("Edit message", item.message)?.trim();
-    if (!next || next === item.message) return;
+    const current = item.display_message ?? "";
+    const next = window.prompt("Edit message", current)?.trim();
+    if (!next || next === current) return;
+    const encrypted = await encryptText(
+      next,
+      user.id,
+      friendId,
+      `friend:${friendship.id}`,
+    );
     const { error } = await supabase.rpc("edit_friend_message", {
       p_message_id: item.id,
-      p_message: next,
+      p_message: encrypted,
     });
     if (error) alert(error.message);
     await load();
@@ -2196,10 +2763,9 @@ function FriendChat({
           <b>{friendship.streak_count} day streak</b>
           <small>Restarts after 3 inactive days.</small>
         </div>
-        <div className="moderation-banner compact">
-          <ShieldAlert size={15} />
-          Never send money, passwords, exact location or unwanted explicit
-          media.
+          <div className="moderation-banner compact">
+          <ShieldAlert size={15} /> End-to-end encrypted · Only you and this
+          friend can read messages or open media.
         </div>
         <div className="friend-message-list" ref={listRef}>
           {!messages.length ? (
@@ -2230,7 +2796,7 @@ function FriendChat({
                     <span>
                       {quoted.deleted_at
                         ? "Message deleted"
-                        : (quoted.message ??
+                        : (quoted.display_message ??
                           (quoted.media_type === "image" ? "Photo" : "Video"))}
                     </span>
                   </div>
@@ -2238,17 +2804,17 @@ function FriendChat({
                 {!item.deleted_at &&
                 item.media_url &&
                 item.media_type === "image" ? (
-                  <img src={item.media_url} alt="Shared attachment" />
+                  <img src={item.media_url} alt="Shared attachment" loading="lazy" />
                 ) : null}
                 {!item.deleted_at &&
                 item.media_url &&
                 item.media_type === "video" ? (
-                  <video src={item.media_url} controls playsInline />
+                  <video src={item.media_url} controls playsInline preload="metadata" />
                 ) : null}
                 {item.deleted_at ? (
                   <span className="deleted-message">Message deleted</span>
-                ) : item.message ? (
-                  <span>{item.message}</span>
+                ) : item.display_message ? (
+                  <span>{item.display_message}</span>
                 ) : null}
                 {!item.deleted_at ? (
                   <div className="message-actions">
@@ -2317,7 +2883,7 @@ function FriendChat({
                   : (friend?.username ?? "friend")}
               </b>
               <span>
-                {replyTo.message ??
+                {replyTo.display_message ??
                   (replyTo.media_type === "image" ? "Photo" : "Video")}
               </span>
             </div>
@@ -2341,7 +2907,7 @@ function FriendChat({
             onClick={() => fileRef.current?.click()}
           >
             <ImagePlus />
-            <span>{uploading ? "Uploading" : "Gallery"}</span>
+            <span>{uploading ? `${friendUploadProgress}%` : "Gallery"}</span>
           </button>
           <input
             value={text}

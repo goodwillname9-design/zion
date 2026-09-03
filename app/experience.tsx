@@ -14,6 +14,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { ensureAnonymousUser, supabase } from "@/lib/supabase";
+import { decryptText, encryptText, isE2EEEnvelope } from "@/lib/e2ee";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 type Stage = "welcome" | "matching" | "question" | "reveal" | "chat";
@@ -29,6 +30,8 @@ type ChatMessage = {
   message: string;
   created_at: string;
   read_at: string | null;
+  display_message?: string;
+  encrypted?: boolean;
 };
 export type ZionProfile = {
   id: string;
@@ -148,13 +151,12 @@ export function Experience({
       setConversationId(match.conversation_id);
       setQuestion(match.shared_question ?? "What made you smile today?");
       setExpiresAt(match.conversation_expires_at ?? "");
-      if (conversation) {
-        setPartnerId(
-          conversation.user_a === userId
-            ? conversation.user_b
-            : conversation.user_a,
-        );
-      }
+      const matchedPartner = conversation
+        ? conversation.user_a === userId
+          ? conversation.user_b
+          : conversation.user_a
+        : "";
+      if (matchedPartner) setPartnerId(matchedPartner);
       const { data: existingAnswer } = await client
         .from("conversation_answers")
         .select("answer")
@@ -163,7 +165,14 @@ export function Experience({
         .maybeSingle();
       if (stopped) return;
       if (existingAnswer?.answer) {
-        setAnswer(existingAnswer.answer);
+        setAnswer(
+          (await decryptText(
+            existingAnswer.answer,
+            userId,
+            matchedPartner,
+            `random:${match.conversation_id}`,
+          )) ?? "",
+        );
         setAnswerSubmitted(true);
       }
       setStage("question");
@@ -196,7 +205,14 @@ export function Experience({
       if (stopped || !data || data.length < 2) return;
       const theirs = data.find((item) => item.user_id !== userId);
       if (theirs) {
-        setPartnerAnswer(theirs.answer);
+        setPartnerAnswer(
+          (await decryptText(
+            theirs.answer,
+            userId,
+            theirs.user_id,
+            `random:${conversationId}`,
+          )) ?? "",
+        );
         setStage("reveal");
       }
     };
@@ -241,7 +257,22 @@ export function Experience({
         .select("id,sender_id,message,created_at,read_at")
         .eq("conversation_id", conversationId)
         .order("created_at");
-      if (!stopped) setMessages((data as ChatMessage[] | null) ?? []);
+      if (!stopped) {
+        const decrypted = await Promise.all(
+          ((data as ChatMessage[] | null) ?? []).map(async (item) => ({
+            ...item,
+            display_message:
+              (await decryptText(
+                item.message,
+                userId,
+                partnerId,
+                `random:${conversationId}`,
+              )) ?? "",
+            encrypted: isE2EEEnvelope(item.message),
+          })),
+        );
+        if (!stopped) setMessages(decrypted);
+      }
     };
 
     void refreshMessages();
@@ -260,8 +291,16 @@ export function Experience({
           table: "messages",
           filter: `conversation_id=eq.${conversationId}`,
         },
-        (event) => {
+        async (event) => {
           const incoming = event.new as ChatMessage;
+          incoming.display_message =
+            (await decryptText(
+              incoming.message,
+              userId,
+              partnerId,
+              `random:${conversationId}`,
+            )) ?? "";
+          incoming.encrypted = isE2EEEnvelope(incoming.message);
           setMessages((current) =>
             current.some((item) => item.id === incoming.id)
               ? current
@@ -280,7 +319,7 @@ export function Experience({
       window.clearInterval(refreshInterval);
       void client.removeChannel(channel);
     };
-  }, [conversationId, stage, userId]);
+  }, [conversationId, partnerId, stage, userId]);
 
   useEffect(() => {
     if (
@@ -317,7 +356,7 @@ export function Experience({
       return;
     const client = supabase;
     const channel = client.channel(`random-room-${conversationId}`, {
-      config: { presence: { key: userId } },
+      config: { private: true, presence: { key: userId } },
     });
     randomChannelRef.current = channel;
     channel
@@ -373,11 +412,23 @@ export function Experience({
     setError("");
     setSubmittingAnswer(true);
     setAnswerSubmitted(true);
+    if (!partnerId) {
+      setError("Secure connection is still being prepared.");
+      setAnswerSubmitted(false);
+      setSubmittingAnswer(false);
+      return;
+    }
+    const encryptedAnswer = await encryptText(
+      answer.trim(),
+      userId,
+      partnerId,
+      `random:${conversationId}`,
+    );
     const { error: submitError } = await supabase.rpc(
       "submit_conversation_answer",
       {
         p_conversation_id: conversationId,
-        p_answer: answer.trim(),
+        p_answer: encryptedAnswer,
       },
     );
     if (submitError) {
@@ -388,15 +439,21 @@ export function Experience({
   };
 
   const sendMessage = async () => {
-    if (!supabase || !message.trim() || partnerLeft) return;
+    if (!supabase || !message.trim() || partnerLeft || !partnerId) return;
     const text = message.trim();
-    setMessage("");
+    const encrypted = await encryptText(
+      text,
+      userId,
+      partnerId,
+      `random:${conversationId}`,
+    );
     const { error: sendError } = await supabase.from("messages").insert({
       conversation_id: conversationId,
       sender_id: userId,
-      message: text,
+      message: encrypted,
     });
     if (sendError) setError(sendError.message);
+    else setMessage("");
   };
 
   const nextHuman = async () => {
@@ -771,8 +828,7 @@ export function Experience({
             <div className="stage chat-stage">
               <div className="chat-head">
                 <div>
-                  <span className="live-dot" /> Connected anonymously · Next
-                  anytime
+                  <span className="live-dot" /> End-to-end encrypted · Next anytime
                 </div>
                 <strong>
                   {String(Math.floor(seconds / 60)).padStart(2, "0")}:
@@ -809,7 +865,9 @@ export function Experience({
                       key={item.id}
                       className={`answer-bubble ${item.sender_id === userId ? "mine" : "theirs"}`}
                     >
-                      <span className="message-text">{item.message}</span>
+                      <span className="message-text">
+                        {item.display_message ?? item.message}
+                      </span>
                       {item.sender_id === userId ? (
                         <span
                           className={`message-receipt ${item.read_at ? "read" : "sent"}`}

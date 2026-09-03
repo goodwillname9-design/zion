@@ -19,6 +19,26 @@ usernames per browser/device and never stores passwords. This device limit is
 a convenience control: clearing browser storage or using another browser resets
 the local list.
 
+## End-to-end encryption update
+
+Run the latest complete `SUPABASE_FINAL_SQL.sql` in the Supabase SQL Editor
+before deploying this version. It creates the E2EE public-key directory,
+owner-only password-wrapped key backups, private Realtime authorization,
+Followers/Following, and encrypted Community tables.
+
+After deployment, every existing user must enter their ZION password once to
+create or unlock the device encryption identity. New friend/random messages,
+answers, photos and videos are encrypted in the browser before upload. Existing
+legacy messages remain readable for compatibility but are not retroactively
+encrypted. Losing the account password can make encrypted history unrecoverable.
+
+Community creation supports trusted friends and member-specific encrypted group
+keys. Friend and Community media uses resumable direct-to-Storage uploads with
+progress and a 250 MB encrypted-object limit. This avoids routing large files
+through Vercel request bodies. Actual capacity and transfer speed still depend
+on the Supabase project plan, storage quota, device memory and network. Share
+only videos/content you own or have permission to distribute.
+
 The login username is permanent for regular accounts. Country can be changed once
 from Profile Settings. The ZION owner account can change its displayed username
 and country whenever needed; its original login username remains the credential
