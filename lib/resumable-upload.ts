@@ -18,19 +18,35 @@ export async function uploadResumable({
   onProgress?: (percentage: number) => void;
 }) {
   if (!supabase) throw new Error("Storage is not configured.");
+  const client = supabase;
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  let { data } = await supabase.auth.getSession();
+  let { data } = await client.auth.getSession();
   if (!data.session?.access_token) {
-    const refreshed = await supabase.auth.refreshSession();
+    const refreshed = await client.auth.refreshSession();
     data = refreshed.data;
   }
-  const accessToken = data.session?.access_token;
-  if (!supabaseUrl || !anonKey || !accessToken)
-    throw new Error("Your secure session could not be refreshed. Please reopen ZION and try again.");
+  let accessToken = data.session?.access_token;
+  if (!supabaseUrl || !anonKey)
+    throw new Error("ZION storage configuration is missing.");
+
+  const standardUpload = async () => {
+    const { error } = await client.storage.from(bucket).upload(path, body, {
+      contentType,
+      cacheControl: "3600",
+      upsert: false,
+    });
+    if (error) throw error;
+    onProgress?.(100);
+  };
+
+  // The regular SDK upload remains a reliable fallback on browsers where the
+  // resumable protocol cannot recover an auth session (private mode/WebView).
+  if (!accessToken) return standardUpload();
 
   const endpoint = `${supabaseUrl.replace(/\/$/, "")}/storage/v1/upload/resumable`;
-  await new Promise<void>((resolve, reject) => {
+  try {
+    await new Promise<void>((resolve, reject) => {
     const upload = new tus.Upload(body, {
       endpoint,
       retryDelays: [0, 1000, 3000, 5000, 10_000],
@@ -38,6 +54,18 @@ export async function uploadResumable({
         authorization: `Bearer ${accessToken}`,
         apikey: anonKey,
         "x-upsert": "false",
+      },
+      onBeforeRequest: async (request) => {
+        const current = await client.auth.getSession();
+        const expiresSoon = (current.data.session?.expires_at ?? 0) * 1000 < Date.now() + 60_000;
+        if (expiresSoon) {
+          const refreshed = await client.auth.refreshSession();
+          accessToken = refreshed.data.session?.access_token ?? accessToken;
+        } else {
+          accessToken = current.data.session?.access_token ?? accessToken;
+        }
+        request.setHeader("authorization", `Bearer ${accessToken}`);
+        request.setHeader("apikey", anonKey);
       },
       uploadDataDuringCreation: true,
       removeFingerprintOnSuccess: true,
@@ -57,5 +85,8 @@ export async function uploadResumable({
       if (previous[0]) upload.resumeFromPreviousUpload(previous[0]);
       upload.start();
     });
-  });
+    });
+  } catch {
+    await standardUpload();
+  }
 }

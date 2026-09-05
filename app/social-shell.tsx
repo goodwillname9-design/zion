@@ -56,7 +56,7 @@ import { Experience, type ZionProfile } from "./experience";
 import { countryLabel, countryOptions } from "./countries";
 import { uploadResumable } from "@/lib/resumable-upload";
 import { FriendGames } from "./friend-games";
-import { ZionReels } from "./zion-reels";
+import { ProfileReels, ZionReels } from "./zion-reels";
 
 type Friendship = {
   id: string;
@@ -78,7 +78,20 @@ type GameInvite = {
   participant_ids: string[];
   accepted_ids: string[];
 };
-type ActivityNotice = { id:number; actor_id:string; kind:"reel_like"|"reel_comment"|"profile_follow"; reel_id:string|null; created_at:string; read_at:string|null };
+type ActivityNotice = {
+  id: number;
+  actor_id: string;
+  kind:
+    | "reel_like"
+    | "reel_comment"
+    | "profile_follow"
+    | "profile_follow_request"
+    | "story_like";
+  reel_id: string | null;
+  follow_request_id: string | null;
+  created_at: string;
+  read_at: string | null;
+};
 type FriendMessage = {
   id: number;
   friendship_id: string;
@@ -100,7 +113,8 @@ const streakBadge = (count: number) =>
   count >= 360 ? "🖤💛❤️" : count >= 30 ? "❤️" : count >= 10 ? "💛" : "🖤";
 const lastSeenLabel = (profile?: ZionProfile, online = false) => {
   if (online) return "Online now";
-  if (!profile?.show_online_status || !profile.last_seen_at) return "Last seen private";
+  if (!profile?.show_online_status || !profile.last_seen_at)
+    return "Last seen private";
   const date = new Date(profile.last_seen_at);
   const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
   if (seconds < 90) return "Last seen just now";
@@ -195,8 +209,19 @@ function ProfileDetails({
       ) : null}
       <p className="profile-handle">@{profile.username}</p>
       <div className="profile-social-counts">
-        <span><b>{followerCount}</b><small>Followers</small></span>
-        <span><b>{followingCount}</b><small>Following</small></span>
+        <span>
+          <b>
+            {new Intl.NumberFormat(undefined, {
+              notation: "compact",
+              maximumFractionDigits: 1,
+            }).format(followerCount + (profile.follower_base_count ?? 0))}
+          </b>
+          <small>Followers</small>
+        </span>
+        <span>
+          <b>{followingCount}</b>
+          <small>Following</small>
+        </span>
       </div>
       <div className="profile-facts">
         <div>
@@ -218,12 +243,74 @@ function ProfileDetails({
   );
 }
 
+function SocialConnections({ user }: { user: User }) {
+  const [mode, setMode] = useState<"followers" | "following">("followers");
+  const [people, setPeople] = useState<ZionProfile[]>([]);
+  useEffect(() => {
+    if (!supabase) return;
+    const client = supabase;
+    void (async () => {
+      const { data } =
+        mode === "followers"
+          ? await client
+              .from("profile_follows")
+              .select("follower_id")
+              .eq("following_id", user.id)
+          : await client
+              .from("profile_follows")
+              .select("following_id")
+              .eq("follower_id", user.id);
+      const ids = (data ?? []).map((row) =>
+        mode === "followers"
+          ? (row as { follower_id: string }).follower_id
+          : (row as { following_id: string }).following_id,
+      );
+      if (!ids.length) return setPeople([]);
+      const { data: profiles } = await client
+        .from("profiles")
+        .select(
+          "id,username,avatar,avatar_url,country,gender,is_banned,ban_reason",
+        )
+        .in("id", ids);
+      setPeople((profiles as ZionProfile[] | null) ?? []);
+    })();
+  }, [mode, user.id]);
+  return (
+    <section className="social-connections">
+      <div>
+        <button
+          className={mode === "followers" ? "active" : ""}
+          onClick={() => setMode("followers")}
+        >
+          Followers
+        </button>
+        <button
+          className={mode === "following" ? "active" : ""}
+          onClick={() => setMode("following")}
+        >
+          Following
+        </button>
+      </div>
+      {people.map((person) => (
+        <article key={person.id}>
+          <ProfileAvatar profile={person} />
+          <b>{person.username}</b>
+          <small>{countryLabel(person.country)}</small>
+        </article>
+      ))}
+      {!people.length ? <p>No {mode} yet.</p> : null}
+    </section>
+  );
+}
+
 export function SocialShell() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<ZionProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [friendsOpen, setFriendsOpen] = useState(false);
-  const [friendsInitialTab, setFriendsInitialTab] = useState<"friends" | "notifications" | "profile" | "communities">("friends");
+  const [friendsInitialTab, setFriendsInitialTab] = useState<
+    "friends" | "notifications" | "profile" | "communities" | "find" | "games"
+  >("friends");
   const [accountManagerOpen, setAccountManagerOpen] = useState(false);
   const [reelsOpen, setReelsOpen] = useState(false);
   const [error, setError] = useState("");
@@ -252,7 +339,7 @@ export function SocialShell() {
         supabase
           .from("profiles")
           .select(
-            "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,profile_edit_used,is_admin,last_seen_at",
+            "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,profile_edit_used,is_admin,last_seen_at,follower_base_count",
           )
           .eq("id", nextUser.id)
           .maybeSingle(),
@@ -340,11 +427,28 @@ export function SocialShell() {
     const client = supabase;
     const refreshNotificationCount = async () => {
       const [friendRequests, gameInvites, activities] = await Promise.all([
-        client.from("friendships").select("id", { count: "exact", head: true }).eq("addressee_id", user.id).eq("status", "pending"),
-        client.from("friend_games").select("id", { count: "exact", head: true }).contains("participant_ids", [user.id]).not("accepted_ids", "cs", `{${user.id}}`).eq("status", "pending"),
-        client.from("zion_notifications").select("id", { count: "exact", head: true }).eq("recipient_id", user.id).is("read_at", null),
+        client
+          .from("friendships")
+          .select("id", { count: "exact", head: true })
+          .eq("addressee_id", user.id)
+          .eq("status", "pending"),
+        client
+          .from("friend_games")
+          .select("id", { count: "exact", head: true })
+          .contains("participant_ids", [user.id])
+          .not("accepted_ids", "cs", `{${user.id}}`)
+          .eq("status", "pending"),
+        client
+          .from("zion_notifications")
+          .select("id", { count: "exact", head: true })
+          .eq("recipient_id", user.id)
+          .is("read_at", null),
       ]);
-      setNotificationCount((friendRequests.count ?? 0) + (gameInvites.count ?? 0) + (activities.count ?? 0));
+      setNotificationCount(
+        (friendRequests.count ?? 0) +
+          (gameInvites.count ?? 0) +
+          (activities.count ?? 0),
+      );
     };
     void refreshNotificationCount();
     const channel = client
@@ -392,31 +496,81 @@ export function SocialShell() {
         },
         async (payload) => {
           void refreshNotificationCount();
-          const row = payload.new as { id?: string; inviter_id?: string; game_type?: GameInvite["game_type"]; status?: string };
+          const row = payload.new as {
+            id?: string;
+            inviter_id?: string;
+            game_type?: GameInvite["game_type"];
+            status?: string;
+          };
           const gameRow = payload.new as unknown as GameInvite;
-          if (payload.eventType !== "INSERT" || row.status !== "pending" || !row.inviter_id || !gameRow.participant_ids?.includes(user.id)) return;
-          const { data: sender } = await client.from("profiles").select("username,avatar").eq("id", row.inviter_id).maybeSingle();
+          if (
+            payload.eventType !== "INSERT" ||
+            row.status !== "pending" ||
+            !row.inviter_id ||
+            !gameRow.participant_ids?.includes(user.id)
+          )
+            return;
+          const { data: sender } = await client
+            .from("profiles")
+            .select("username,avatar")
+            .eq("id", row.inviter_id)
+            .maybeSingle();
           const name = sender?.username ?? "A ZION friend";
-          const gameName = row.game_type === "tic_tac_toe" ? "Tic-Tac-Toe" : row.game_type === "chess" ? "Chess" : "Ludo";
-          setNotificationToast(`${sender?.avatar ?? "🎮"} ${name} invited you to ${gameName}`);
+          const gameName =
+            row.game_type === "tic_tac_toe"
+              ? "Tic-Tac-Toe"
+              : row.game_type === "chess"
+                ? "Chess"
+                : "Ludo";
+          setNotificationToast(
+            `${sender?.avatar ?? "🎮"} ${name} invited you to ${gameName}`,
+          );
           window.setTimeout(() => setNotificationToast(""), 6000);
           if (Notification.permission === "granted") {
             const registration = await navigator.serviceWorker?.ready;
             await registration?.showNotification("New ZION game invitation", {
-              body: `${name} invited you to ${gameName}.`, icon: "/icons/zion-192.png", badge: "/icons/zion-192.png",
-              tag: `game-${row.id ?? row.inviter_id}`, data: { url: "/" },
+              body: `${name} invited you to ${gameName}.`,
+              icon: "/icons/zion-192.png",
+              badge: "/icons/zion-192.png",
+              tag: `game-${row.id ?? row.inviter_id}`,
+              data: { url: "/" },
             });
           }
         },
       )
-      .on("postgres_changes", { event: "*", schema: "public", table: "zion_notifications", filter: `recipient_id=eq.${user.id}` }, async (payload) => {
-        void refreshNotificationCount();
-        if(payload.eventType!=="INSERT")return;
-        const row=payload.new as {actor_id?:string;kind?:string}; if(!row.actor_id)return;
-        const {data:actor}=await client.from("profiles").select("username,avatar").eq("id",row.actor_id).maybeSingle();
-        const action=row.kind==="reel_comment"?"commented on your reel":row.kind==="profile_follow"?"started following you":"liked your reel";
-        setNotificationToast(`${actor?.avatar??"❤️"} ${actor?.username??"A ZION user"} ${action}`);
-      })
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "zion_notifications",
+          filter: `recipient_id=eq.${user.id}`,
+        },
+        async (payload) => {
+          void refreshNotificationCount();
+          if (payload.eventType !== "INSERT") return;
+          const row = payload.new as { actor_id?: string; kind?: string };
+          if (!row.actor_id) return;
+          const { data: actor } = await client
+            .from("profiles")
+            .select("username,avatar")
+            .eq("id", row.actor_id)
+            .maybeSingle();
+          const action =
+            row.kind === "reel_comment"
+              ? "commented on your reel"
+              : row.kind === "story_like"
+                ? "liked your story"
+                : row.kind === "profile_follow_request"
+                  ? "requested to follow you"
+                  : row.kind === "profile_follow"
+                    ? "started following you"
+                    : "liked your reel";
+          setNotificationToast(
+            `${actor?.avatar ?? "❤️"} ${actor?.username ?? "A ZION user"} ${action}`,
+          );
+        },
+      )
       .subscribe();
     return () => {
       void client.removeChannel(channel);
@@ -480,6 +634,14 @@ export function SocialShell() {
           setFriendsInitialTab("profile");
           setFriendsOpen(true);
         }}
+        onOpenFindFriends={() => {
+          setFriendsInitialTab("find");
+          setFriendsOpen(true);
+        }}
+        onOpenGames={() => {
+          setFriendsInitialTab("games");
+          setFriendsOpen(true);
+        }}
         notificationCount={notificationCount}
         onOpenAccountManager={() => setAccountManagerOpen(true)}
       />
@@ -498,7 +660,9 @@ export function SocialShell() {
           onClose={() => setAccountManagerOpen(false)}
         />
       ) : null}
-      {reelsOpen ? <ZionReels user={user} onClose={() => setReelsOpen(false)} /> : null}
+      {reelsOpen ? (
+        <ZionReels user={user} onClose={() => setReelsOpen(false)} />
+      ) : null}
       {notificationToast ? (
         <button
           className="notification-toast"
@@ -655,14 +819,19 @@ function LoginScreen({
           window.dispatchEvent(new Event("zion-e2ee-ready"));
         } catch (problem) {
           await supabase.auth.signOut();
-          setError(problem instanceof Error ? problem.message : "Encryption setup failed.");
+          setError(
+            problem instanceof Error
+              ? problem.message
+              : "Encryption setup failed.",
+          );
         }
       }
     } else {
-      const { data, error: loginError } = await supabase.auth.signInWithPassword({
-        email: authEmail,
-        password,
-      });
+      const { data, error: loginError } =
+        await supabase.auth.signInWithPassword({
+          email: authEmail,
+          password,
+        });
       if (loginError) setError("Incorrect username or password.");
       else {
         try {
@@ -671,7 +840,11 @@ function LoginScreen({
           window.dispatchEvent(new Event("zion-e2ee-ready"));
         } catch (problem) {
           await supabase.auth.signOut();
-          setError(problem instanceof Error ? problem.message : "Encryption setup failed.");
+          setError(
+            problem instanceof Error
+              ? problem.message
+              : "Encryption setup failed.",
+          );
         }
       }
     }
@@ -793,7 +966,10 @@ function EncryptionUnlock({
           placeholder="Account password"
           autoFocus
         />
-        <Button disabled={busy || password.length < 6} onClick={() => void unlock()}>
+        <Button
+          disabled={busy || password.length < 6}
+          onClick={() => void unlock()}
+        >
           {busy ? "Unlocking…" : "Unlock encrypted chats"}
         </Button>
       </section>
@@ -1081,7 +1257,8 @@ function FriendsPanel({
 }: {
   user: User;
   profile: ZionProfile;
-  initialTab: "friends" | "notifications" | "profile" | "communities";
+  initialTab:
+    "friends" | "notifications" | "profile" | "communities" | "find" | "games";
   onProfileUpdated: (profile: ZionProfile) => void;
   onClose: () => void;
 }) {
@@ -1094,7 +1271,13 @@ function FriendsPanel({
   const [selected, setSelected] = useState<Friendship | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "friends" | "notifications" | "find" | "profile" | "communities" | "games" | "admin"
+    | "friends"
+    | "notifications"
+    | "find"
+    | "profile"
+    | "communities"
+    | "games"
+    | "admin"
   >(initialTab);
   const [searchName, setSearchName] = useState("");
   const [searching, setSearching] = useState(false);
@@ -1115,36 +1298,73 @@ function FriendsPanel({
   const [editUsername, setEditUsername] = useState(profile.username);
   const [editCountry, setEditCountry] = useState(profile.country);
   const [followingIds, setFollowingIds] = useState<string[]>([]);
-  const [socialCounts, setSocialCounts] = useState({ followers: 0, following: 0 });
+  const [socialCounts, setSocialCounts] = useState({
+    followers: 0,
+    following: 0,
+  });
   const load = useCallback(async () => {
     if (!supabase) return;
-    const [{ data: rows }, { data: pinRows }, { data: privacy }, { data: followingRows }, followerCount, followingCount, { data: inviteRows }, { data: activityRows }] =
-      await Promise.all([
-        supabase
-          .from("friendships")
-          .select(
-            "id,requester_id,addressee_id,status,created_at,accepted_at,streak_count,last_streak_date",
-          )
-          .order("created_at", { ascending: false }),
-        supabase.from("friend_pins").select("friend_id").eq("user_id", user.id),
-        supabase
-          .from("profiles")
-          .select("allow_audio_calls,show_country,show_online_status")
-          .eq("id", user.id)
-          .single(),
-        supabase.from("profile_follows").select("following_id").eq("follower_id", user.id),
-        supabase.from("profile_follows").select("follower_id", { count: "exact", head: true }).eq("following_id", user.id),
-        supabase.from("profile_follows").select("following_id", { count: "exact", head: true }).eq("follower_id", user.id),
-        supabase.from("friend_games").select("id,friendship_id,inviter_id,opponent_id,game_type,status,participant_ids,accepted_ids").contains("participant_ids", [user.id]).not("accepted_ids", "cs", `{${user.id}}`).eq("status", "pending").order("created_at", { ascending: false }),
-        supabase.from("zion_notifications").select("id,actor_id,kind,reel_id,created_at,read_at").eq("recipient_id",user.id).order("created_at",{ascending:false}).limit(50),
-      ]);
+    const [
+      { data: rows },
+      { data: pinRows },
+      { data: privacy },
+      { data: followingRows },
+      followerCount,
+      followingCount,
+      { data: inviteRows },
+      { data: activityRows },
+    ] = await Promise.all([
+      supabase
+        .from("friendships")
+        .select(
+          "id,requester_id,addressee_id,status,created_at,accepted_at,streak_count,last_streak_date",
+        )
+        .order("created_at", { ascending: false }),
+      supabase.from("friend_pins").select("friend_id").eq("user_id", user.id),
+      supabase
+        .from("profiles")
+        .select("allow_audio_calls,show_country,show_online_status")
+        .eq("id", user.id)
+        .single(),
+      supabase
+        .from("profile_follows")
+        .select("following_id")
+        .eq("follower_id", user.id),
+      supabase
+        .from("profile_follows")
+        .select("follower_id", { count: "exact", head: true })
+        .eq("following_id", user.id),
+      supabase
+        .from("profile_follows")
+        .select("following_id", { count: "exact", head: true })
+        .eq("follower_id", user.id),
+      supabase
+        .from("friend_games")
+        .select(
+          "id,friendship_id,inviter_id,opponent_id,game_type,status,participant_ids,accepted_ids",
+        )
+        .contains("participant_ids", [user.id])
+        .not("accepted_ids", "cs", `{${user.id}}`)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("zion_notifications")
+        .select("id,actor_id,kind,reel_id,follow_request_id,created_at,read_at")
+        .eq("recipient_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(50),
+    ]);
     const list = (rows as Friendship[] | null) ?? [];
     setFriendships(list);
     setPins((pinRows ?? []).map((item) => item.friend_id));
     setFollowingIds((followingRows ?? []).map((item) => item.following_id));
-    setSocialCounts({ followers: followerCount.count ?? 0, following: followingCount.count ?? 0 });
+    setSocialCounts({
+      followers: followerCount.count ?? 0,
+      following: followingCount.count ?? 0,
+    });
     setGameInvites((inviteRows as GameInvite[] | null) ?? []);
-    const activities=(activityRows as ActivityNotice[]|null)??[]; setActivityNotices(activities);
+    const activities = (activityRows as ActivityNotice[] | null) ?? [];
+    setActivityNotices(activities);
     if (privacy) {
       setAllowCalls(privacy.allow_audio_calls);
       setShowCountry(privacy.show_country);
@@ -1152,15 +1372,17 @@ function FriendsPanel({
     }
     const ids = [
       ...new Set(
-        [...list.flatMap((item) => [item.requester_id, item.addressee_id]), ...activities.map((item)=>item.actor_id)]
-          .filter((id) => id !== user.id),
+        [
+          ...list.flatMap((item) => [item.requester_id, item.addressee_id]),
+          ...activities.map((item) => item.actor_id),
+        ].filter((id) => id !== user.id),
       ),
     ];
     if (ids.length) {
       const { data } = await supabase
         .from("profiles")
         .select(
-          "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,is_admin,last_seen_at",
+          "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,is_admin,last_seen_at,follower_base_count",
         )
         .in("id", ids);
       setProfiles(
@@ -1186,7 +1408,11 @@ function FriendsPanel({
         { event: "*", schema: "public", table: "friendships" },
         refresh,
       )
-      .on("postgres_changes", { event: "*", schema: "public", table: "friend_games" }, refresh)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "friend_games" },
+        refresh,
+      )
       .subscribe();
     return () => {
       window.clearTimeout(initial);
@@ -1194,7 +1420,23 @@ function FriendsPanel({
       void client.removeChannel(channel);
     };
   }, [load, user.id]);
-  useEffect(()=>{if(activeTab!=="notifications"||!supabase||!activityNotices.some(x=>!x.read_at))return; const timer=window.setTimeout(()=>{void supabase!.from("zion_notifications").update({read_at:new Date().toISOString()}).eq("recipient_id",user.id).is("read_at",null);},1200); return()=>window.clearTimeout(timer);},[activeTab,activityNotices,user.id]);
+  useEffect(() => {
+    if (
+      activeTab !== "notifications" ||
+      !supabase ||
+      !activityNotices.some((x) => !x.read_at)
+    )
+      return;
+    const timer = window.setTimeout(() => {
+      void supabase!
+        .from("zion_notifications")
+        .update({ read_at: new Date().toISOString() })
+        .eq("recipient_id", user.id)
+        .is("read_at", null)
+        .neq("kind", "profile_follow_request");
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [activeTab, activityNotices, user.id]);
   const otherId = useCallback(
     (item: Friendship) =>
       item.requester_id === user.id ? item.addressee_id : item.requester_id,
@@ -1216,9 +1458,15 @@ function FriendsPanel({
       .eq("id", item.id);
     await load();
   };
-  const respondToGameInvite = async (game: GameInvite, acceptInvite: boolean) => {
+  const respondToGameInvite = async (
+    game: GameInvite,
+    acceptInvite: boolean,
+  ) => {
     if (!supabase) return;
-    const { error } = await supabase.rpc("respond_zion_game", { p_game_id: game.id, p_accept: acceptInvite });
+    const { error } = await supabase.rpc("respond_zion_game", {
+      p_game_id: game.id,
+      p_accept: acceptInvite,
+    });
     if (error) return alert(error.message);
     if (acceptInvite) {
       setGameToOpen(game.id);
@@ -1253,18 +1501,16 @@ function FriendsPanel({
     () =>
       friendships
         .filter((item) => item.status === "accepted")
-        .sort(
-          (a, b) => {
-            const pinOrder =
-              Number(pins.includes(otherId(b))) -
-              Number(pins.includes(otherId(a)));
-            if (pinOrder) return pinOrder;
-            return (
-              new Date(b.accepted_at ?? b.created_at).getTime() -
-              new Date(a.accepted_at ?? a.created_at).getTime()
-            );
-          },
-        ),
+        .sort((a, b) => {
+          const pinOrder =
+            Number(pins.includes(otherId(b))) -
+            Number(pins.includes(otherId(a)));
+          if (pinOrder) return pinOrder;
+          return (
+            new Date(b.accepted_at ?? b.created_at).getTime() -
+            new Date(a.accepted_at ?? a.created_at).getTime()
+          );
+        }),
     [friendships, otherId, pins],
   );
   const pendingRequests = useMemo(
@@ -1359,10 +1605,32 @@ function FriendsPanel({
   const toggleFollow = async (profileId: string) => {
     if (!supabase || profileId === user.id) return;
     if (followingIds.includes(profileId))
-      await supabase.from("profile_follows").delete().eq("follower_id", user.id).eq("following_id", profileId);
-    else
-      await supabase.from("profile_follows").insert({ follower_id: user.id, following_id: profileId });
+      await supabase
+        .from("profile_follows")
+        .delete()
+        .eq("follower_id", user.id)
+        .eq("following_id", profileId);
+    else {
+      const { error } = await supabase.rpc("request_zion_follow", {
+        p_target_id: profileId,
+      });
+      setSearchMessage(
+        error?.message ?? "Follow request sent. They can Accept or Decline it.",
+      );
+    }
     await load();
+  };
+  const respondToFollow = async (
+    notice: ActivityNotice,
+    acceptFollow: boolean,
+  ) => {
+    if (!supabase || !notice.follow_request_id) return;
+    const { error } = await supabase.rpc("respond_zion_follow", {
+      p_request_id: notice.follow_request_id,
+      p_accept: acceptFollow,
+    });
+    if (error) alert(error.message);
+    else await load();
   };
   const uploadProfilePhoto = async (file?: File) => {
     if (!supabase || !file) return;
@@ -1638,14 +1906,18 @@ function FriendsPanel({
                 profile: profiles[otherId(item)],
               }))
               .filter(
-                (item): item is { friendshipId: string; profile: ZionProfile } =>
+                (
+                  item,
+                ): item is { friendshipId: string; profile: ZionProfile } =>
                   Boolean(item.profile),
               )}
           />
         ) : activeTab === "communities" ? (
           <CommunityPanel
             user={user}
-            friends={accepted.map((item) => profiles[otherId(item)]).filter(Boolean)}
+            friends={accepted
+              .map((item) => profiles[otherId(item)])
+              .filter(Boolean)}
           />
         ) : activeTab === "notifications" ? (
           <div className="notification-center">
@@ -1654,42 +1926,120 @@ function FriendsPanel({
             </h2>
             {gameInvites.map((game) => {
               const person = profiles[game.inviter_id];
-              const gameName = game.game_type === "tic_tac_toe" ? "Tic-Tac-Toe" : game.game_type === "chess" ? "Chess" : "Ludo";
+              const gameName =
+                game.game_type === "tic_tac_toe"
+                  ? "Tic-Tac-Toe"
+                  : game.game_type === "chess"
+                    ? "Chess"
+                    : "Ludo";
               return (
-                <div className="notification-request game-invite-notification" key={game.id}>
-                  <span className="notification-game-icon">{game.game_type === "ludo" ? "🎲" : game.game_type === "chess" ? "♛" : "✕○"}</span>
-                  <div><b>{person?.username ?? "ZION friend"}</b><small>invited you to {gameName}</small></div>
-                  <button className="request-decline" onClick={() => void respondToGameInvite(game, false)}>Decline</button>
-                  <button className="request-accept" onClick={() => void respondToGameInvite(game, true)}>Accept &amp; Play</button>
+                <div
+                  className="notification-request game-invite-notification"
+                  key={game.id}
+                >
+                  <span className="notification-game-icon">
+                    {game.game_type === "ludo"
+                      ? "🎲"
+                      : game.game_type === "chess"
+                        ? "♛"
+                        : "✕○"}
+                  </span>
+                  <div>
+                    <b>{person?.username ?? "ZION friend"}</b>
+                    <small>invited you to {gameName}</small>
+                  </div>
+                  <button
+                    className="request-decline"
+                    onClick={() => void respondToGameInvite(game, false)}
+                  >
+                    Decline
+                  </button>
+                  <button
+                    className="request-accept"
+                    onClick={() => void respondToGameInvite(game, true)}
+                  >
+                    Accept &amp; Play
+                  </button>
                 </div>
               );
             })}
-            {activityNotices.map((notice)=>{const actor=profiles[notice.actor_id]; const action=notice.kind==="reel_comment"?"commented on your reel":notice.kind==="profile_follow"?"started following you":"liked your reel"; return <div className={`notification-request activity-notice ${notice.read_at?"":"unread"}`} key={`activity-${notice.id}`}><ProfileAvatar profile={actor}/><div><b>{actor?.username??"ZION user"}</b><small>{action}</small></div><span>{notice.kind==="reel_comment"?"💬":notice.kind==="profile_follow"?"➕":"❤️"}</span></div>;})}
-            {pendingRequests.map((item) => {
-                const person = profiles[otherId(item)];
-                return (
-                  <div className="notification-request" key={item.id}>
-                    <ProfileAvatar profile={person} />
-                    <div>
-                      <b>{person?.username ?? "ZION user"}</b>
-                      <small>sent you a friend request</small>
-                    </div>
-                    <button
-                      className="request-decline"
-                      onClick={() => void decline(item)}
-                    >
-                      Decline
-                    </button>
-                    <button
-                      className="request-accept"
-                      onClick={() => void accept(item)}
-                    >
-                      Accept
-                    </button>
+            {activityNotices.map((notice) => {
+              const actor = profiles[notice.actor_id];
+              const action =
+                notice.kind === "reel_comment"
+                  ? "commented on your reel"
+                  : notice.kind === "story_like"
+                    ? "liked your story"
+                    : notice.kind === "profile_follow_request"
+                      ? "requested to follow you"
+                      : notice.kind === "profile_follow"
+                        ? "started following you"
+                        : "liked your reel";
+              return (
+                <div
+                  className={`notification-request activity-notice ${notice.read_at ? "" : "unread"}`}
+                  key={`activity-${notice.id}`}
+                >
+                  <ProfileAvatar profile={actor} />
+                  <div>
+                    <b>{actor?.username ?? "ZION user"}</b>
+                    <small>{action}</small>
                   </div>
-                );
-              })}
-            {!pendingRequests.length && !gameInvites.length && !activityNotices.length ? (
+                  {notice.kind === "profile_follow_request" &&
+                  !notice.read_at ? (
+                    <>
+                      <button
+                        className="request-decline"
+                        onClick={() => void respondToFollow(notice, false)}
+                      >
+                        Decline
+                      </button>
+                      <button
+                        className="request-accept"
+                        onClick={() => void respondToFollow(notice, true)}
+                      >
+                        Accept
+                      </button>
+                    </>
+                  ) : (
+                    <span>
+                      {notice.kind === "reel_comment"
+                        ? "💬"
+                        : notice.kind === "profile_follow"
+                          ? "➕"
+                          : "❤️"}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            {pendingRequests.map((item) => {
+              const person = profiles[otherId(item)];
+              return (
+                <div className="notification-request" key={item.id}>
+                  <ProfileAvatar profile={person} />
+                  <div>
+                    <b>{person?.username ?? "ZION user"}</b>
+                    <small>sent you a friend request</small>
+                  </div>
+                  <button
+                    className="request-decline"
+                    onClick={() => void decline(item)}
+                  >
+                    Decline
+                  </button>
+                  <button
+                    className="request-accept"
+                    onClick={() => void accept(item)}
+                  >
+                    Accept
+                  </button>
+                </div>
+              );
+            })}
+            {!pendingRequests.length &&
+            !gameInvites.length &&
+            !activityNotices.length ? (
               <div className="empty-friends">
                 <Bell />
                 <p>No new notifications.</p>
@@ -1697,12 +2047,22 @@ function FriendsPanel({
             ) : null}
           </div>
         ) : activeTab === "profile" ? (
-          <ProfileDetails
-            profile={profile}
-            label="My ZION Profile"
-            followerCount={socialCounts.followers}
-            followingCount={socialCounts.following}
-          />
+          <div className="my-profile-page">
+            <ProfileDetails
+              profile={profile}
+              label="My ZION Profile"
+              followerCount={socialCounts.followers}
+              followingCount={socialCounts.following}
+            />
+            <button
+              className="edit-profile-main"
+              onClick={() => setSettingsOpen(true)}
+            >
+              Edit photo, name &amp; country
+            </button>
+            <ProfileReels user={user} profile={profile} />
+            <SocialConnections user={user} />
+          </div>
         ) : activeTab === "find" ? (
           <div className="find-friends">
             <h2>Find Friends</h2>
@@ -1752,7 +2112,9 @@ function FriendsPanel({
                   variant="outline"
                   onClick={() => void toggleFollow(searchResult.id)}
                 >
-                  {followingIds.includes(searchResult.id) ? "Following" : "Follow"}
+                  {followingIds.includes(searchResult.id)
+                    ? "Following"
+                    : "Follow"}
                 </Button>
               </div>
             ) : null}
@@ -1862,7 +2224,13 @@ type CommunityMessage = {
   display_message?: string;
 };
 
-function CommunityPanel({ user, friends }: { user: User; friends: ZionProfile[] }) {
+function CommunityPanel({
+  user,
+  friends,
+}: {
+  user: User;
+  friends: ZionProfile[];
+}) {
   const [communities, setCommunities] = useState<Community[]>([]);
   const [selected, setSelected] = useState<Community | null>(null);
   const [messages, setMessages] = useState<CommunityMessage[]>([]);
@@ -1938,7 +2306,9 @@ function CommunityPanel({ user, friends }: { user: User; friends: ZionProfile[] 
     if (!supabase || !selected || !secret) return;
     const { data } = await supabase
       .from("community_messages")
-      .select("id,community_id,sender_id,ciphertext,created_at,media_path,media_type")
+      .select(
+        "id,community_id,sender_id,ciphertext,created_at,media_path,media_type",
+      )
       .eq("community_id", selected.id)
       .order("created_at")
       .limit(300);
@@ -2021,13 +2391,15 @@ function CommunityPanel({ user, friends }: { user: User; friends: ZionProfile[] 
       const groupSecret = createGroupSecret();
       const members = [user.id, ...memberIds];
       if (memberIds.length) {
-        const { error: memberError } = await supabase.from("community_members").insert(
-          memberIds.map((id) => ({
-            community_id: community.id,
-            user_id: id,
-            role: "member",
-          })),
-        );
+        const { error: memberError } = await supabase
+          .from("community_members")
+          .insert(
+            memberIds.map((id) => ({
+              community_id: community.id,
+              user_id: id,
+              role: "member",
+            })),
+          );
         if (memberError) throw memberError;
       }
       const wrapped = await Promise.all(
@@ -2054,7 +2426,11 @@ function CommunityPanel({ user, friends }: { user: User; friends: ZionProfile[] 
       await loadCommunities();
       await openCommunity(community);
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : "Secure group setup failed.");
+      setError(
+        problem instanceof Error
+          ? problem.message
+          : "Secure group setup failed.",
+      );
     }
   };
 
@@ -2066,12 +2442,14 @@ function CommunityPanel({ user, friends }: { user: User; friends: ZionProfile[] 
       secret,
       `community:${selected.id}:1`,
     );
-    const { error: sendError } = await supabase.from("community_messages").insert({
-      community_id: selected.id,
-      sender_id: user.id,
-      ciphertext,
-      key_version: 1,
-    });
+    const { error: sendError } = await supabase
+      .from("community_messages")
+      .insert({
+        community_id: selected.id,
+        sender_id: user.id,
+        ciphertext,
+        key_version: 1,
+      });
     if (sendError) setError(sendError.message);
     else {
       setText("");
@@ -2112,18 +2490,22 @@ function CommunityPanel({ user, friends }: { user: User; friends: ZionProfile[] 
         contentType: "application/octet-stream",
         onProgress: setUploadProgress,
       });
-      const { error: messageError } = await supabase.from("community_messages").insert({
-        community_id: selected.id,
-        sender_id: user.id,
-        ciphertext: metadata,
-        media_path: path,
-        media_type: mediaType,
-        key_version: 1,
-      });
+      const { error: messageError } = await supabase
+        .from("community_messages")
+        .insert({
+          community_id: selected.id,
+          sender_id: user.id,
+          ciphertext: metadata,
+          media_path: path,
+          media_type: mediaType,
+          key_version: 1,
+        });
       if (messageError) throw messageError;
       await loadMessages();
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : "Media upload failed.");
+      setError(
+        problem instanceof Error ? problem.message : "Media upload failed.",
+      );
     }
     setUploadProgress(null);
     if (communityFileRef.current) communityFileRef.current.value = "";
@@ -2133,48 +2515,166 @@ function CommunityPanel({ user, friends }: { user: User; friends: ZionProfile[] 
     return (
       <div className="community-chat">
         <div className="community-chat-head">
-          <button onClick={() => { setSelected(null); setSecret(""); }}><ArrowLeft /></button>
-          <div><b>{selected.name}</b><small>🔒 End-to-end encrypted group</small></div>
+          <button
+            onClick={() => {
+              setSelected(null);
+              setSecret("");
+            }}
+          >
+            <ArrowLeft />
+          </button>
+          <div>
+            <b>{selected.name}</b>
+            <small>🔒 End-to-end encrypted group</small>
+          </div>
         </div>
         <div className="community-message-list">
           {messages.map((item) => (
-            <div key={item.id} className={item.sender_id === user.id ? "community-bubble mine" : "community-bubble"}>
-              <small>{item.sender_id === user.id ? "You" : (friends.find((friend) => friend.id === item.sender_id)?.username ?? "Member")}</small>
-              {item.media_url && item.media_type === "image" ? <img src={item.media_url} alt="Encrypted community attachment" loading="lazy" /> : null}
-              {item.media_url && item.media_type === "video" ? <video src={item.media_url} controls playsInline preload="metadata" /> : null}
+            <div
+              key={item.id}
+              className={
+                item.sender_id === user.id
+                  ? "community-bubble mine"
+                  : "community-bubble"
+              }
+            >
+              <small>
+                {item.sender_id === user.id
+                  ? "You"
+                  : (friends.find((friend) => friend.id === item.sender_id)
+                      ?.username ?? "Member")}
+              </small>
+              {item.media_url && item.media_type === "image" ? (
+                <img
+                  src={item.media_url}
+                  alt="Encrypted community attachment"
+                  loading="lazy"
+                />
+              ) : null}
+              {item.media_url && item.media_type === "video" ? (
+                <video
+                  src={item.media_url}
+                  controls
+                  playsInline
+                  preload="metadata"
+                />
+              ) : null}
               <span>{item.display_message}</span>
             </div>
           ))}
-          {!messages.length ? <p>Start this private community conversation.</p> : null}
+          {!messages.length ? (
+            <p>Start this private community conversation.</p>
+          ) : null}
         </div>
         <div className="friend-compose">
-          <input ref={communityFileRef} hidden type="file" accept="image/*,video/*" onChange={(event) => void uploadCommunityMedia(event.target.files?.[0])} />
-          <button className="media-button" onClick={() => communityFileRef.current?.click()} disabled={uploadProgress !== null}><ImagePlus /><span>{uploadProgress === null ? "Gallery" : `${uploadProgress}%`}</span></button>
-          <input value={text} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void sendCommunityMessage()} placeholder="Message community…" maxLength={2000} />
-          <button className="send-button" onClick={() => void sendCommunityMessage()} disabled={!text.trim()}><Send /></button>
+          <input
+            ref={communityFileRef}
+            hidden
+            type="file"
+            accept="image/*,video/*"
+            onChange={(event) =>
+              void uploadCommunityMedia(event.target.files?.[0])
+            }
+          />
+          <button
+            className="media-button"
+            onClick={() => communityFileRef.current?.click()}
+            disabled={uploadProgress !== null}
+          >
+            <ImagePlus />
+            <span>
+              {uploadProgress === null ? "Gallery" : `${uploadProgress}%`}
+            </span>
+          </button>
+          <input
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            onKeyDown={(event) =>
+              event.key === "Enter" && void sendCommunityMessage()
+            }
+            placeholder="Message community…"
+            maxLength={2000}
+          />
+          <button
+            className="send-button"
+            onClick={() => void sendCommunityMessage()}
+            disabled={!text.trim()}
+          >
+            <Send />
+          </button>
         </div>
       </div>
     );
 
   return (
     <div className="community-panel">
-      <div className="community-title"><div><span className="mini-label">ZION COMMUNITIES</span><h2>Private group chats</h2></div><button onClick={() => setCreating((value) => !value)}>{creating ? "Cancel" : "+ Create"}</button></div>
+      <div className="community-title">
+        <div>
+          <span className="mini-label">ZION COMMUNITIES</span>
+          <h2>Private group chats</h2>
+        </div>
+        <button onClick={() => setCreating((value) => !value)}>
+          {creating ? "Cancel" : "+ Create"}
+        </button>
+      </div>
       {error ? <p className="error-note">{error}</p> : null}
       {creating ? (
         <div className="community-create">
-          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Community name" maxLength={60} />
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Community name"
+            maxLength={60}
+          />
           <b>Add trusted friends</b>
           <div className="community-member-picker">
             {friends.map((friend) => (
-              <label key={friend.id}><input type="checkbox" checked={memberIds.includes(friend.id)} onChange={(event) => setMemberIds((current) => event.target.checked ? [...current, friend.id] : current.filter((id) => id !== friend.id))} /><ProfileAvatar profile={friend} /><span>{friend.username}</span></label>
+              <label key={friend.id}>
+                <input
+                  type="checkbox"
+                  checked={memberIds.includes(friend.id)}
+                  onChange={(event) =>
+                    setMemberIds((current) =>
+                      event.target.checked
+                        ? [...current, friend.id]
+                        : current.filter((id) => id !== friend.id),
+                    )
+                  }
+                />
+                <ProfileAvatar profile={friend} />
+                <span>{friend.username}</span>
+              </label>
             ))}
           </div>
-          <Button className="primary-action" disabled={name.trim().length < 3} onClick={() => void createCommunity()}>Create encrypted community</Button>
+          <Button
+            className="primary-action"
+            disabled={name.trim().length < 3}
+            onClick={() => void createCommunity()}
+          >
+            Create encrypted community
+          </Button>
         </div>
       ) : null}
       <div className="community-list">
-        {communities.map((community) => <button key={community.id} onClick={() => void openCommunity(community)}><span>👥</span><div><b>{community.name}</b><small>Encrypted community</small></div><ArrowRight /></button>)}
-        {!communities.length && !creating ? <div className="empty-friends"><Users /><p>Create a community and add trusted friends.</p></div> : null}
+        {communities.map((community) => (
+          <button
+            key={community.id}
+            onClick={() => void openCommunity(community)}
+          >
+            <span>👥</span>
+            <div>
+              <b>{community.name}</b>
+              <small>Encrypted community</small>
+            </div>
+            <ArrowRight />
+          </button>
+        ))}
+        {!communities.length && !creating ? (
+          <div className="empty-friends">
+            <Users />
+            <p>Create a community and add trusted friends.</p>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -2350,9 +2850,14 @@ function FriendChat({
         const { data: signed } = await supabase!.storage
           .from("chat-media")
           .createSignedUrl(item.media_path, 3600);
-        if (!signed?.signedUrl) return { ...item, display_message: null, encrypted };
+        if (!signed?.signedUrl)
+          return { ...item, display_message: null, encrypted };
         if (!encrypted)
-          return { ...item, display_message: null, media_url: signed.signedUrl };
+          return {
+            ...item,
+            display_message: null,
+            media_url: signed.signedUrl,
+          };
         try {
           const metadata = JSON.parse(decrypted ?? "{}") as { mime?: string };
           const response = await fetch(signed.signedUrl);
@@ -2655,7 +3160,11 @@ function FriendChat({
       setReplyTo(null);
       await load();
     } catch (problem) {
-      alert(problem instanceof Error ? problem.message : "Encrypted message failed.");
+      alert(
+        problem instanceof Error
+          ? problem.message
+          : "Encrypted message failed.",
+      );
     }
   };
   const upload = async (file?: File) => {
@@ -2694,17 +3203,21 @@ function FriendChat({
         contentType: "application/octet-stream",
         onProgress: setFriendUploadProgress,
       });
-      const { error: messageError } = await supabase.from("friend_messages").insert({
-        friendship_id: friendship.id,
-        sender_id: user.id,
-        message: encryptedMetadata,
-        media_path: path,
-        media_type: mediaType,
-        reply_to_id: replyTo?.id ?? null,
-      });
+      const { error: messageError } = await supabase
+        .from("friend_messages")
+        .insert({
+          friendship_id: friendship.id,
+          sender_id: user.id,
+          message: encryptedMetadata,
+          media_path: path,
+          media_type: mediaType,
+          reply_to_id: replyTo?.id ?? null,
+        });
       if (messageError) throw messageError;
     } catch (problem) {
-      alert(problem instanceof Error ? problem.message : "Encrypted upload failed.");
+      alert(
+        problem instanceof Error ? problem.message : "Encrypted upload failed.",
+      );
     }
     setUploading(false);
     setFriendUploadProgress(0);
@@ -2712,7 +3225,13 @@ function FriendChat({
     await load();
   };
   const editMessage = async (item: FriendMessage) => {
-    if (!supabase || !friendId || !item.message || item.deleted_at || item.media_path)
+    if (
+      !supabase ||
+      !friendId ||
+      !item.message ||
+      item.deleted_at ||
+      item.media_path
+    )
       return;
     const current = item.display_message ?? "";
     const next = window.prompt("Edit message", current)?.trim();
@@ -2826,6 +3345,7 @@ function FriendChat({
             <b>Friend Profile</b>
           </header>
           <ProfileDetails profile={friend} label="Friend Profile" />
+          <ProfileReels user={user} profile={friend} />
           <div className="profile-status-row">
             <i className={friendOnline ? "online" : "offline"} />
             <b>{lastSeenLabel(friend, friendOnline)}</b>
@@ -2977,7 +3497,7 @@ function FriendChat({
           <b>{friendship.streak_count} day streak</b>
           <small>Restarts after 3 inactive days.</small>
         </div>
-          <div className="moderation-banner compact">
+        <div className="moderation-banner compact">
           <ShieldAlert size={15} /> End-to-end encrypted · Only you and this
           friend can read messages or open media.
         </div>
@@ -3018,12 +3538,21 @@ function FriendChat({
                 {!item.deleted_at &&
                 item.media_url &&
                 item.media_type === "image" ? (
-                  <img src={item.media_url} alt="Shared attachment" loading="lazy" />
+                  <img
+                    src={item.media_url}
+                    alt="Shared attachment"
+                    loading="lazy"
+                  />
                 ) : null}
                 {!item.deleted_at &&
                 item.media_url &&
                 item.media_type === "video" ? (
-                  <video src={item.media_url} controls playsInline preload="metadata" />
+                  <video
+                    src={item.media_url}
+                    controls
+                    playsInline
+                    preload="metadata"
+                  />
                 ) : null}
                 {item.deleted_at ? (
                   <span className="deleted-message">Message deleted</span>

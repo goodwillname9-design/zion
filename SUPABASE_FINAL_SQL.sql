@@ -465,6 +465,39 @@ do $$ begin
     foreign key(reply_to_id) references public.friend_messages(id) on delete set null;
   end if;
 end $$;
+
+/* Deferred until the media tables declared later in this migration.
+-- ZION profile, follower approval, story likes and owner/admin media controls.
+alter table public.profiles add column if not exists follower_base_count integer not null default 0;
+update public.profiles set follower_base_count=30500 where id='fd62030e-f3b8-4c14-bce7-a1f3eedbb74b'::uuid;
+
+alter table public.zion_notifications drop constraint if exists zion_notifications_kind_check;
+alter table public.zion_notifications add column if not exists follow_request_id uuid;
+alter table public.zion_notifications add constraint zion_notifications_kind_check check(kind in ('reel_like','reel_comment','profile_follow','profile_follow_request','story_like'));
+
+create table if not exists public.zion_story_likes(story_id uuid not null references public.zion_stories(id) on delete cascade,user_id uuid not null references auth.users(id) on delete cascade,created_at timestamptz not null default now(),primary key(story_id,user_id));
+alter table public.zion_story_likes enable row level security;
+drop policy if exists "View story likes" on public.zion_story_likes; create policy "View story likes" on public.zion_story_likes for select to authenticated using(true);
+drop policy if exists "Like stories" on public.zion_story_likes; create policy "Like stories" on public.zion_story_likes for insert to authenticated with check(user_id=auth.uid());
+drop policy if exists "Unlike stories" on public.zion_story_likes; create policy "Unlike stories" on public.zion_story_likes for delete to authenticated using(user_id=auth.uid());
+create or replace function public.notify_story_like() returns trigger language plpgsql security definer set search_path='' as $$ declare owner uuid; begin select owner_id into owner from public.zion_stories where id=new.story_id; if owner<>new.user_id then insert into public.zion_notifications(recipient_id,actor_id,kind) values(owner,new.user_id,'story_like'); end if; return new; end; $$;
+drop trigger if exists notify_story_like on public.zion_story_likes; create trigger notify_story_like after insert on public.zion_story_likes for each row execute function public.notify_story_like();
+
+create table if not exists public.profile_follow_requests(id uuid primary key default gen_random_uuid(),requester_id uuid not null references auth.users(id) on delete cascade,target_id uuid not null references auth.users(id) on delete cascade,status text not null default 'pending' check(status in ('pending','accepted','declined')),created_at timestamptz not null default now(),unique(requester_id,target_id),check(requester_id<>target_id));
+alter table public.profile_follow_requests enable row level security;
+drop policy if exists "Follow request members view" on public.profile_follow_requests; create policy "Follow request members view" on public.profile_follow_requests for select to authenticated using(auth.uid()=requester_id or auth.uid()=target_id);
+create or replace function public.request_zion_follow(p_target_id uuid) returns text language plpgsql security definer set search_path='' as $$ declare req uuid; begin if p_target_id=auth.uid() then raise exception 'Cannot follow yourself'; end if; if exists(select 1 from public.profile_follows where follower_id=auth.uid() and following_id=p_target_id) then return 'following'; end if; insert into public.profile_follow_requests(requester_id,target_id,status) values(auth.uid(),p_target_id,'pending') on conflict(requester_id,target_id) do update set status='pending',created_at=now() returning id into req; insert into public.zion_notifications(recipient_id,actor_id,kind,follow_request_id) values(p_target_id,auth.uid(),'profile_follow_request',req); return 'pending'; end; $$;
+create or replace function public.respond_zion_follow(p_request_id uuid,p_accept boolean) returns text language plpgsql security definer set search_path='' as $$ declare req public.profile_follow_requests; begin select * into req from public.profile_follow_requests where id=p_request_id and target_id=auth.uid() and status='pending' for update; if req.id is null then raise exception 'Follow request unavailable'; end if; update public.profile_follow_requests set status=case when p_accept then 'accepted' else 'declined' end where id=req.id; if p_accept then insert into public.profile_follows(follower_id,following_id) values(req.requester_id,req.target_id) on conflict do nothing; end if; update public.zion_notifications set read_at=now() where follow_request_id=req.id and recipient_id=auth.uid(); return case when p_accept then 'accepted' else 'declined' end; end; $$;
+revoke all on function public.request_zion_follow(uuid) from public; grant execute on function public.request_zion_follow(uuid) to authenticated;
+revoke all on function public.respond_zion_follow(uuid,boolean) from public; grant execute on function public.respond_zion_follow(uuid,boolean) to authenticated;
+drop trigger if exists notify_profile_follow on public.profile_follows;
+
+create or replace function public.cleanup_expired_zion_stories() returns integer language plpgsql security definer set search_path='' as $$ declare removed integer; begin delete from public.zion_stories where expires_at<=now(); get diagnostics removed=row_count; return removed; end; $$;
+grant execute on function public.cleanup_expired_zion_stories() to authenticated;
+drop policy if exists "Delete own reels" on public.zion_reels; create policy "Delete own reels" on public.zion_reels for delete to authenticated using(owner_id=auth.uid() or public.is_zion_admin());
+drop policy if exists "Delete own stories" on public.zion_stories; create policy "Delete own stories" on public.zion_stories for delete to authenticated using(owner_id=auth.uid() or public.is_zion_admin());
+drop policy if exists "Owners and admin delete reel story media" on storage.objects; create policy "Owners and admin delete reel story media" on storage.objects for delete to authenticated using(bucket_id='chat-media' and (storage.foldername(name))[1] in ('reels','stories') and ((storage.foldername(name))[2]=auth.uid()::text or public.is_zion_admin()));
+*/
 alter table public.friend_messages enable row level security;
 drop policy if exists "Friends read messages" on public.friend_messages;
 create policy "Friends read messages" on public.friend_messages
@@ -1025,3 +1058,30 @@ do $$ begin
     alter publication supabase_realtime add table public.friend_games;
   end if;
 end $$;
+
+-- ZION profile, follower approval, story likes and owner/admin media controls.
+alter table public.profiles add column if not exists follower_base_count integer not null default 0;
+update public.profiles set follower_base_count=30500 where id='fd62030e-f3b8-4c14-bce7-a1f3eedbb74b'::uuid;
+alter table public.zion_notifications drop constraint if exists zion_notifications_kind_check;
+alter table public.zion_notifications add column if not exists follow_request_id uuid;
+alter table public.zion_notifications add constraint zion_notifications_kind_check check(kind in ('reel_like','reel_comment','profile_follow','profile_follow_request','story_like'));
+create table if not exists public.zion_story_likes(story_id uuid not null references public.zion_stories(id) on delete cascade,user_id uuid not null references auth.users(id) on delete cascade,created_at timestamptz not null default now(),primary key(story_id,user_id));
+alter table public.zion_story_likes enable row level security;
+drop policy if exists "View story likes" on public.zion_story_likes; create policy "View story likes" on public.zion_story_likes for select to authenticated using(true);
+drop policy if exists "Like stories" on public.zion_story_likes; create policy "Like stories" on public.zion_story_likes for insert to authenticated with check(user_id=auth.uid());
+drop policy if exists "Unlike stories" on public.zion_story_likes; create policy "Unlike stories" on public.zion_story_likes for delete to authenticated using(user_id=auth.uid());
+create or replace function public.notify_story_like() returns trigger language plpgsql security definer set search_path='' as $$ declare owner uuid; begin select owner_id into owner from public.zion_stories where id=new.story_id; if owner<>new.user_id then insert into public.zion_notifications(recipient_id,actor_id,kind) values(owner,new.user_id,'story_like'); end if; return new; end; $$;
+drop trigger if exists notify_story_like on public.zion_story_likes; create trigger notify_story_like after insert on public.zion_story_likes for each row execute function public.notify_story_like();
+create table if not exists public.profile_follow_requests(id uuid primary key default gen_random_uuid(),requester_id uuid not null references auth.users(id) on delete cascade,target_id uuid not null references auth.users(id) on delete cascade,status text not null default 'pending' check(status in ('pending','accepted','declined')),created_at timestamptz not null default now(),unique(requester_id,target_id),check(requester_id<>target_id));
+alter table public.profile_follow_requests enable row level security;
+drop policy if exists "Follow request members view" on public.profile_follow_requests; create policy "Follow request members view" on public.profile_follow_requests for select to authenticated using(auth.uid()=requester_id or auth.uid()=target_id);
+create or replace function public.request_zion_follow(p_target_id uuid) returns text language plpgsql security definer set search_path='' as $$ declare req uuid; begin if p_target_id=auth.uid() then raise exception 'Cannot follow yourself'; end if; if exists(select 1 from public.profile_follows where follower_id=auth.uid() and following_id=p_target_id) then return 'following'; end if; insert into public.profile_follow_requests(requester_id,target_id,status) values(auth.uid(),p_target_id,'pending') on conflict(requester_id,target_id) do update set status='pending',created_at=now() returning id into req; insert into public.zion_notifications(recipient_id,actor_id,kind,follow_request_id) values(p_target_id,auth.uid(),'profile_follow_request',req); return 'pending'; end; $$;
+create or replace function public.respond_zion_follow(p_request_id uuid,p_accept boolean) returns text language plpgsql security definer set search_path='' as $$ declare req public.profile_follow_requests; begin select * into req from public.profile_follow_requests where id=p_request_id and target_id=auth.uid() and status='pending' for update; if req.id is null then raise exception 'Follow request unavailable'; end if; update public.profile_follow_requests set status=case when p_accept then 'accepted' else 'declined' end where id=req.id; if p_accept then insert into public.profile_follows(follower_id,following_id) values(req.requester_id,req.target_id) on conflict do nothing; end if; update public.zion_notifications set read_at=now() where follow_request_id=req.id and recipient_id=auth.uid(); return case when p_accept then 'accepted' else 'declined' end; end; $$;
+revoke all on function public.request_zion_follow(uuid) from public; grant execute on function public.request_zion_follow(uuid) to authenticated;
+revoke all on function public.respond_zion_follow(uuid,boolean) from public; grant execute on function public.respond_zion_follow(uuid,boolean) to authenticated;
+drop trigger if exists notify_profile_follow on public.profile_follows;
+create or replace function public.cleanup_expired_zion_stories() returns integer language plpgsql security definer set search_path='' as $$ declare removed integer; begin delete from public.zion_stories where expires_at<=now(); get diagnostics removed=row_count; return removed; end; $$;
+grant execute on function public.cleanup_expired_zion_stories() to authenticated;
+drop policy if exists "Delete own reels" on public.zion_reels; create policy "Delete own reels" on public.zion_reels for delete to authenticated using(owner_id=auth.uid() or public.is_zion_admin());
+drop policy if exists "Delete own stories" on public.zion_stories; create policy "Delete own stories" on public.zion_stories for delete to authenticated using(owner_id=auth.uid() or public.is_zion_admin());
+drop policy if exists "Owners and admin delete reel story media" on storage.objects; create policy "Owners and admin delete reel story media" on storage.objects for delete to authenticated using(bucket_id='chat-media' and (storage.foldername(name))[1] in ('reels','stories') and ((storage.foldername(name))[2]=auth.uid()::text or public.is_zion_admin()));

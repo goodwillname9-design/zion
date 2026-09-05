@@ -5,9 +5,11 @@ import {
   ArrowRight,
   Bell,
   Clapperboard,
+  Gamepad2,
   Globe2,
   Heart,
   MessageCircle,
+  Search,
   Send,
   Shield,
   Sparkles,
@@ -51,6 +53,7 @@ export type ZionProfile = {
   profile_edit_used?: boolean;
   is_admin?: boolean;
   last_seen_at?: string;
+  follower_base_count?: number;
 };
 
 export function Experience({
@@ -60,6 +63,8 @@ export function Experience({
   onOpenCommunities,
   onOpenReels,
   onOpenProfile,
+  onOpenFindFriends,
+  onOpenGames,
   notificationCount = 0,
   onOpenAccountManager,
 }: {
@@ -69,6 +74,8 @@ export function Experience({
   onOpenCommunities?: () => void;
   onOpenReels?: () => void;
   onOpenProfile?: () => void;
+  onOpenFindFriends?: () => void;
+  onOpenGames?: () => void;
   notificationCount?: number;
   onOpenAccountManager?: () => void;
 }) {
@@ -145,54 +152,54 @@ export function Experience({
       if (matchingRequestRunning) return;
       matchingRequestRunning = true;
       try {
-      const { data, error: matchError } = await client.rpc(
-        "find_random_match",
-        {
-          p_language: "en",
-        },
-      );
-      if (stopped) return;
-      if (matchError) {
-        setError(matchError.message);
-        return;
-      }
-      const match = (data as MatchRow[] | null)?.[0];
-      if (match?.match_status !== "matched" || !match.conversation_id) return;
-
-      const { data: conversation } = await client
-        .from("conversations")
-        .select("user_a,user_b")
-        .eq("id", match.conversation_id)
-        .single();
-      if (stopped) return;
-      setConversationId(match.conversation_id);
-      setQuestion(match.shared_question ?? "What made you smile today?");
-      setExpiresAt(match.conversation_expires_at ?? "");
-      const matchedPartner = conversation
-        ? conversation.user_a === userId
-          ? conversation.user_b
-          : conversation.user_a
-        : "";
-      if (matchedPartner) setPartnerId(matchedPartner);
-      const { data: existingAnswer } = await client
-        .from("conversation_answers")
-        .select("answer")
-        .eq("conversation_id", match.conversation_id)
-        .eq("user_id", userId)
-        .maybeSingle();
-      if (stopped) return;
-      if (existingAnswer?.answer) {
-        setAnswer(
-          (await decryptText(
-            existingAnswer.answer,
-            userId,
-            matchedPartner,
-            `random:${match.conversation_id}`,
-          )) ?? "",
+        const { data, error: matchError } = await client.rpc(
+          "find_random_match",
+          {
+            p_language: "en",
+          },
         );
-        setAnswerSubmitted(true);
-      }
-      setStage("question");
+        if (stopped) return;
+        if (matchError) {
+          setError(matchError.message);
+          return;
+        }
+        const match = (data as MatchRow[] | null)?.[0];
+        if (match?.match_status !== "matched" || !match.conversation_id) return;
+
+        const { data: conversation } = await client
+          .from("conversations")
+          .select("user_a,user_b")
+          .eq("id", match.conversation_id)
+          .single();
+        if (stopped) return;
+        setConversationId(match.conversation_id);
+        setQuestion(match.shared_question ?? "What made you smile today?");
+        setExpiresAt(match.conversation_expires_at ?? "");
+        const matchedPartner = conversation
+          ? conversation.user_a === userId
+            ? conversation.user_b
+            : conversation.user_a
+          : "";
+        if (matchedPartner) setPartnerId(matchedPartner);
+        const { data: existingAnswer } = await client
+          .from("conversation_answers")
+          .select("answer")
+          .eq("conversation_id", match.conversation_id)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (stopped) return;
+        if (existingAnswer?.answer) {
+          setAnswer(
+            (await decryptText(
+              existingAnswer.answer,
+              userId,
+              matchedPartner,
+              `random:${match.conversation_id}`,
+            )) ?? "",
+          );
+          setAnswerSubmitted(true);
+        }
+        setStage("question");
       } finally {
         matchingRequestRunning = false;
       }
@@ -572,12 +579,33 @@ export function Experience({
             <Users size={16} />
             <b>Friends</b>
           </button>
-          <button className="friends-nav community-nav" type="button" onClick={onOpenCommunities}>
+          <button
+            className="friends-nav"
+            type="button"
+            onClick={onOpenFindFriends}
+          >
+            <Search size={16} />
+            <b>Find Friends</b>
+          </button>
+          <button className="friends-nav" type="button" onClick={onOpenGames}>
+            <Gamepad2 size={16} />
+            <b>Games</b>
+          </button>
+          <button
+            className="friends-nav community-nav"
+            type="button"
+            onClick={onOpenCommunities}
+          >
             <Globe2 size={16} />
             <b>Communities</b>
           </button>
-          <button className="friends-nav reels-nav" type="button" onClick={onOpenReels}>
-            <Clapperboard size={16} /><b>Reels</b>
+          <button
+            className="friends-nav reels-nav"
+            type="button"
+            onClick={onOpenReels}
+          >
+            <Clapperboard size={16} />
+            <b>Reels</b>
           </button>
           <button
             className="friends-nav notification-nav"
@@ -896,7 +924,8 @@ export function Experience({
             <div className="stage chat-stage">
               <div className="chat-head">
                 <div>
-                  <span className="live-dot" /> End-to-end encrypted · Next anytime
+                  <span className="live-dot" /> End-to-end encrypted · Next
+                  anytime
                 </div>
                 <strong>
                   {String(Math.floor(seconds / 60)).padStart(2, "0")}:
