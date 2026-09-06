@@ -101,6 +101,7 @@ type FriendMessage = {
   media_type: "image" | "video" | "audio" | null;
   view_once: boolean;
   viewed_at: string | null;
+  hidden_for: string[];
   created_at: string;
   read_at: string | null;
   edited_at: string | null;
@@ -1308,6 +1309,9 @@ function FriendsPanel({
     (ZionProfile & { friend_status?: string }) | null
   >(null);
   const [searchMessage, setSearchMessage] = useState("");
+  const [inspectedProfile, setInspectedProfile] = useState<ZionProfile | null>(
+    null,
+  );
   const profileFileRef = useRef<HTMLInputElement>(null);
   const [theme, setTheme] = useState<"dark" | "day">(() =>
     typeof window !== "undefined" &&
@@ -1393,7 +1397,17 @@ function FriendsPanel({
       following: followingCount.count ?? 0,
     });
     setGameInvites((inviteRows as GameInvite[] | null) ?? []);
-    const activities = (activityRows as ActivityNotice[] | null) ?? [];
+    const seenActivityKeys = new Set<string>();
+    const activities = ((activityRows as ActivityNotice[] | null) ?? []).filter(
+      (notice) => {
+        if (notice.kind === "profile_follow_request" && notice.read_at)
+          return false;
+        const key = `${notice.actor_id}:${notice.kind}:${notice.follow_request_id ?? notice.reel_id ?? ""}`;
+        if (seenActivityKeys.has(key)) return false;
+        seenActivityKeys.add(key);
+        return true;
+      },
+    );
     setActivityNotices(activities);
     if (privacy) {
       setAllowCalls(privacy.allow_audio_calls);
@@ -1454,6 +1468,16 @@ function FriendsPanel({
           }
           refresh();
         },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "zion_notifications",
+          filter: `recipient_id=eq.${user.id}`,
+        },
+        refresh,
       )
       .subscribe();
     return () => {
@@ -1726,6 +1750,30 @@ function FriendsPanel({
     await supabase.auth.signOut();
     onClose();
   };
+  if (inspectedProfile)
+    return (
+      <div className="social-overlay">
+        <section className="friends-panel profile-view-panel notification-profile-view">
+          <header>
+            <button
+              className="visible-back"
+              onClick={() => setInspectedProfile(null)}
+            >
+              <ArrowLeft /> <span>Back</span>
+            </button>
+            <b>Profile</b>
+          </header>
+          <ProfileDetails profile={inspectedProfile} label="ZION Profile" />
+          <button
+            className="edit-profile-main"
+            onClick={() => void toggleFollow(inspectedProfile.id)}
+          >
+            {followingIds.includes(inspectedProfile.id) ? "Unfollow" : "Follow"}
+          </button>
+          <ProfileReels user={user} profile={inspectedProfile} />
+        </section>
+      </div>
+    );
   if (selected)
     return (
       <FriendChat
@@ -2036,11 +2084,16 @@ function FriendsPanel({
                   className={`notification-request activity-notice ${notice.read_at ? "" : "unread"}`}
                   key={`activity-${notice.id}`}
                 >
-                  <ProfileAvatar profile={actor} />
-                  <div>
-                    <b>{actor?.username ?? "ZION user"}</b>
-                    <small>{action}</small>
-                  </div>
+                  <button
+                    className="notification-actor"
+                    onClick={() => actor && setInspectedProfile(actor)}
+                  >
+                    <ProfileAvatar profile={actor} />
+                    <span>
+                      <b>{actor?.username ?? "ZION user"}</b>
+                      <small>{action}</small>
+                    </span>
+                  </button>
                   {notice.kind === "profile_follow_request" &&
                   !notice.read_at ? (
                     <>
@@ -2073,11 +2126,16 @@ function FriendsPanel({
               const person = profiles[otherId(item)];
               return (
                 <div className="notification-request" key={item.id}>
-                  <ProfileAvatar profile={person} />
-                  <div>
-                    <b>{person?.username ?? "ZION user"}</b>
-                    <small>sent you a friend request</small>
-                  </div>
+                  <button
+                    className="notification-actor"
+                    onClick={() => person && setInspectedProfile(person)}
+                  >
+                    <ProfileAvatar profile={person} />
+                    <span>
+                      <b>{person?.username ?? "ZION user"}</b>
+                      <small>sent you a friend request</small>
+                    </span>
+                  </button>
                   <button
                     className="request-decline"
                     onClick={() => void decline(item)}
@@ -2912,6 +2970,8 @@ function FriendChat({
   const [recording, setRecording] = useState(false);
   const [sendViewOnce, setSendViewOnce] = useState(false);
   const [openedOnceIds, setOpenedOnceIds] = useState<number[]>([]);
+  const [messageMenu, setMessageMenu] = useState<FriendMessage | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<FriendMessage | null>(null);
   const [friendOnline, setFriendOnline] = useState(false);
   const [friendLastSeen, setFriendLastSeen] = useState(friend?.last_seen_at);
   const [friendTyping, setFriendTyping] = useState(false);
@@ -2929,6 +2989,7 @@ function FriendChat({
   const fileRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recorderChunksRef = useRef<Blob[]>([]);
+  const messageHoldRef = useRef<number | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -2963,11 +3024,13 @@ function FriendChat({
     const { data } = await supabase
       .from("friend_messages")
       .select(
-        "id,friendship_id,sender_id,message,media_path,media_type,view_once,viewed_at,created_at,read_at,edited_at,deleted_at,reply_to_id",
+        "id,friendship_id,sender_id,message,media_path,media_type,view_once,viewed_at,hidden_for,created_at,read_at,edited_at,deleted_at,reply_to_id",
       )
       .eq("friendship_id", friendship.id)
       .order("created_at");
-    const rows = (data as FriendMessage[] | null) ?? [];
+    const rows = ((data as FriendMessage[] | null) ?? []).filter(
+      (item) => !item.hidden_for?.includes(user.id),
+    );
     const withUrls = await Promise.all(
       rows.map(async (item) => {
         const encrypted = isE2EEEnvelope(item.message);
@@ -3436,6 +3499,23 @@ function FriendChat({
     if (replyTo?.id === item.id) setReplyTo(null);
     await load();
   };
+  const deleteMessageForMe = async (item: FriendMessage) => {
+    if (!supabase) return;
+    const { error } = await supabase.rpc("hide_friend_message_for_me", {
+      p_message_id: item.id,
+    });
+    if (error) alert(error.message);
+    setMessageMenu(null);
+    await load();
+  };
+  const startMessageHold = (item: FriendMessage) => {
+    if (messageHoldRef.current) window.clearTimeout(messageHoldRef.current);
+    messageHoldRef.current = window.setTimeout(() => setMessageMenu(item), 520);
+  };
+  const cancelMessageHold = () => {
+    if (messageHoldRef.current) window.clearTimeout(messageHoldRef.current);
+    messageHoldRef.current = null;
+  };
   const requestCall = (kind: "audio" | "video") => {
     setCallError("");
     if (!friendOnline) {
@@ -3700,6 +3780,14 @@ function FriendChat({
             return (
               <div
                 key={item.id}
+                onPointerDown={() => startMessageHold(item)}
+                onPointerUp={cancelMessageHold}
+                onPointerCancel={cancelMessageHold}
+                onPointerLeave={cancelMessageHold}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setMessageMenu(item);
+                }}
                 className={
                   item.sender_id === user.id
                     ? "friend-bubble mine"
@@ -3741,6 +3829,7 @@ function FriendChat({
                     src={item.media_url}
                     alt="Shared attachment"
                     loading="lazy"
+                    onClick={() => setMediaPreview(item)}
                   />
                 ) : null}
                 {!item.deleted_at &&
@@ -3895,6 +3984,59 @@ function FriendChat({
             {recording ? <MicOff /> : <Mic />}
           </button>
         </div>
+        {messageMenu ? (
+          <div
+            className="message-menu-overlay"
+            onClick={() => setMessageMenu(null)}
+          >
+            <div
+              className="message-action-sheet"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <b>Message options</b>
+              <button onClick={() => void deleteMessageForMe(messageMenu)}>
+                <Trash2 /> Delete for me
+              </button>
+              {messageMenu.sender_id === user.id ? (
+                <button
+                  className="danger"
+                  onClick={() => {
+                    setMessageMenu(null);
+                    void deleteMessage(messageMenu);
+                  }}
+                >
+                  <Trash2 /> Delete for everyone
+                </button>
+              ) : null}
+              <button onClick={() => setMessageMenu(null)}>Cancel</button>
+            </div>
+          </div>
+        ) : null}
+        {mediaPreview?.media_url ? (
+          <div
+            className="chat-media-lightbox"
+            onClick={() => setMediaPreview(null)}
+          >
+            <button aria-label="Close preview">
+              <X />
+            </button>
+            {mediaPreview.media_type === "video" ? (
+              <video
+                src={mediaPreview.media_url}
+                controls
+                autoPlay
+                playsInline
+                onClick={(event) => event.stopPropagation()}
+              />
+            ) : (
+              <img
+                src={mediaPreview.media_url}
+                alt="Full-screen shared media"
+                onClick={(event) => event.stopPropagation()}
+              />
+            )}
+          </div>
+        ) : null}
       </section>
     </div>
   );

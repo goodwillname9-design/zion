@@ -3878,6 +3878,32 @@ footer span {
   border-radius: 15px;
   background: rgba(109, 242, 193, 0.05);
 }
+.notification-actor {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.notification-actor > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.notification-actor b,
+.notification-actor small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notification-profile-view {
+  overflow-y: auto;
+}
 .notification-request > div {
   display: flex;
   flex-direction: column;
@@ -5727,6 +5753,82 @@ html[data-theme="day"] .friend-chat small {
   color: inherit;
   background: rgba(255, 255, 255, 0.09);
   font-weight: 850;
+}
+.friend-bubble img {
+  cursor: zoom-in;
+  transition:
+    transform 0.18s ease,
+    filter 0.18s ease;
+}
+.friend-bubble img:active {
+  transform: scale(0.985);
+  filter: brightness(0.92);
+}
+.message-menu-overlay,
+.chat-media-lightbox {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: max(18px, env(safe-area-inset-top)) 16px
+    max(18px, env(safe-area-inset-bottom));
+  background: rgba(4, 3, 11, 0.78);
+  backdrop-filter: blur(14px);
+}
+.message-action-sheet {
+  width: min(390px, 100%);
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 22px;
+  color: #fff;
+  background: #171429;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.55);
+  animation: bubble-in 0.2s ease-out;
+}
+.message-action-sheet b {
+  padding: 4px 5px 9px;
+}
+.message-action-sheet button {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 850;
+}
+.message-action-sheet button.danger {
+  color: #ff9aad;
+  background: rgba(255, 68, 104, 0.1);
+}
+.chat-media-lightbox {
+  background: rgba(0, 0, 0, 0.94);
+}
+.chat-media-lightbox > button {
+  position: absolute;
+  top: max(18px, calc(env(safe-area-inset-top) + 10px));
+  right: 18px;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+}
+.chat-media-lightbox img,
+.chat-media-lightbox video {
+  max-width: 100%;
+  max-height: calc(100dvh - 70px);
+  object-fit: contain;
+  border-radius: 12px;
 }
 @keyframes recording-pulse {
   to {
