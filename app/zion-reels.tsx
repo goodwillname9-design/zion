@@ -757,11 +757,26 @@ export function ProfileReels({
   user: User;
   profile: ZionProfile;
 }) {
+  const [tab, setTab] = useState<"posts" | "reels">("posts");
+  const [canView, setCanView] = useState(true);
   const [items, setItems] = useState<
     Array<{ id: string; video_path: string; caption: string; url: string }>
   >([]);
   const load = useCallback(async () => {
     if (!supabase) return;
+    if (profile.is_private && user.id !== profile.id && user.id !== CEO_ID) {
+      const { count } = await supabase
+        .from("profile_follows")
+        .select("following_id", { count: "exact", head: true })
+        .eq("follower_id", user.id)
+        .eq("following_id", profile.id);
+      if (!count) {
+        setCanView(false);
+        setItems([]);
+        return;
+      }
+    }
+    setCanView(true);
     const { data } = await supabase
       .from("zion_reels")
       .select("id,video_path,caption")
@@ -778,7 +793,7 @@ export function ProfileReels({
         url: signed?.[index]?.signedUrl ?? "",
       })),
     );
-  }, [profile.id]);
+  }, [profile.id, profile.is_private, user.id]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -795,8 +810,27 @@ export function ProfileReels({
   const allowed = user.id === profile.id || user.id === CEO_ID;
   return (
     <section className="profile-reels">
-      <h3>Reels</h3>
-      <div>
+      <div className="profile-media-tabs">
+        <button
+          className={tab === "posts" ? "active" : ""}
+          onClick={() => setTab("posts")}
+        >
+          Posts
+        </button>
+        <button
+          className={tab === "reels" ? "active" : ""}
+          onClick={() => setTab("reels")}
+        >
+          Reels
+        </button>
+      </div>
+      {!canView ? (
+        <div className="private-profile-media">
+          <b>Private account</b>
+          <p>Follow this account to view their posts and Reels.</p>
+        </div>
+      ) : null}
+      {canView ? <div className={tab === "posts" ? "posts-grid" : "reels-grid"}>
         {items.map((item) => (
           <article key={item.id}>
             <video src={item.url} controls playsInline preload="metadata" />
@@ -806,8 +840,8 @@ export function ProfileReels({
             ) : null}
           </article>
         ))}
-      </div>
-      {!items.length ? <p>No Reels posted yet.</p> : null}
+      </div> : null}
+      {canView && !items.length ? <p>No posts or Reels uploaded yet.</p> : null}
     </section>
   );
 }

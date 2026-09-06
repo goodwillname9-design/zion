@@ -4689,10 +4689,65 @@ footer span {
 .profile-reels > h3 {
   margin: 0 0 10px;
 }
+.profile-media-tabs {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 0 !important;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.profile-media-tabs button {
+  position: relative !important;
+  inset: auto !important;
+  min-height: 44px;
+  border-radius: 0 !important;
+  color: var(--muted) !important;
+  background: transparent !important;
+}
+.profile-media-tabs button.active {
+  color: #d9ff83 !important;
+}
+.profile-media-tabs button.active::after {
+  content: "";
+  position: absolute;
+  right: 16%;
+  bottom: -1px;
+  left: 16%;
+  height: 2px;
+  border-radius: 2px;
+  background: #d9ff83;
+}
 .profile-reels > div {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px;
+}
+.profile-reels > .profile-media-tabs {
+  grid-template-columns: 1fr 1fr;
+}
+.profile-reels > .posts-grid article {
+  aspect-ratio: 1;
+}
+.profile-reels > .reels-grid article {
+  aspect-ratio: 9/16;
+}
+.private-profile-media {
+  min-height: 150px;
+  display: grid !important;
+  place-content: center;
+  gap: 7px !important;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  text-align: center;
+  background: var(--surface);
+}
+.private-profile-media p {
+  position: static;
+  margin: 0;
+  color: var(--muted);
+  white-space: normal;
+  text-shadow: none;
 }
 .profile-reels article {
   position: relative;
@@ -4766,7 +4821,19 @@ footer span {
   grid-column: 2;
 }
 .my-profile-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scroll-behavior: smooth;
+  padding-right: 4px;
   padding-bottom: max(28px, env(safe-area-inset-bottom));
+}
+.profile-view-panel {
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 html[data-theme="day"] .friends-panel,
@@ -5722,7 +5789,7 @@ html[data-theme="day"] .friend-chat small {
 }
 
 .friend-chat .friend-compose {
-  grid-template-columns: 80px 44px minmax(0, 1fr) 52px 52px;
+  grid-template-columns: 104px minmax(0, 1fr) 52px 52px;
 }
 .friend-chat .view-once-toggle,
 .friend-chat .voice-note-button {
@@ -5938,5 +6005,240 @@ html[data-theme="day"] .friend-chat small {
   }
   .dice-button-pro {
     min-height: 58px;
+  }
+}
+
+/* V48 — media fills chat bubbles without coloured side gutters. */
+.friend-bubble.has-media {
+  width: min(360px, 78vw);
+  max-width: 88%;
+  padding: 0;
+  background: #0b0a12 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  overflow: hidden;
+}
+.friend-bubble.has-media.mine {
+  background: #0b0a12 !important;
+  border-color: rgba(109, 242, 193, 0.38);
+  border-radius: 18px;
+}
+.friend-bubble.has-media > img,
+.friend-bubble.has-media > video {
+  width: 100%;
+  max-width: none;
+  max-height: min(520px, 62dvh);
+  margin: 0;
+  border-radius: 0;
+  object-fit: cover;
+}
+.view-once-sent {
+  min-width: 210px;
+  min-height: 74px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 14px 18px 30px;
+  color: #d9ff83;
+  background: #171429;
+  font-weight: 850;
+}
+.media-choice-overlay {
+  position: fixed;
+  z-index: 160;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(4, 3, 11, 0.76);
+  backdrop-filter: blur(14px);
+}
+.media-choice-sheet {
+  width: min(380px, 100%);
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 22px;
+  background: #171429;
+  box-shadow: 0 28px 80px rgba(0,0,0,.5);
+}
+.media-choice-sheet b {
+  padding: 4px 5px 10px;
+}
+.media-choice-sheet button {
+  min-height: 48px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 14px;
+  color: #f7f4fc;
+  background: rgba(255,255,255,.06);
+  font-weight: 850;
+}
+.media-choice-sheet button.view-once {
+  color: #171328;
+  background: linear-gradient(135deg,#d9ff83,#6df2c1);
+}
+.friend-bubble.has-media > span:not(.deleted-message) {
+  padding: 10px 12px 34px;
+  color: #f5f2fb;
+  background: #171429;
+}
+.friend-bubble.has-media .message-actions {
+  left: 7px;
+  bottom: 7px;
+  padding: 3px;
+  border-radius: 9px;
+  color: #fff;
+  background: rgba(8, 7, 15, 0.62);
+  backdrop-filter: blur(10px);
+}
+.friend-bubble.has-media > small {
+  right: 8px;
+  bottom: 8px;
+  padding: 3px 5px;
+  border-radius: 7px;
+  color: #8affd0;
+  background: rgba(8, 7, 15, 0.62);
+  backdrop-filter: blur(10px);
+}
+
+@media (max-width: 640px) {
+  .friend-bubble.has-media {
+    width: min(360px, 82vw);
+    max-width: 92%;
+  }
+  .friend-chat .friend-compose,
+  .social-overlay .friend-chat .friend-compose {
+    grid-template-columns: 52px minmax(0, 1fr) 48px 48px;
+    align-items: center;
+  }
+  .friend-compose .media-button span {
+    display: none;
+  }
+  .friend-compose > input:not([type="file"]),
+  .friend-compose > button {
+    min-height: 48px;
+    margin: 0;
+    border-radius: 15px;
+  }
+}
+
+/* V51 — compact, thumb-friendly iPhone layout with reliable notch spacing. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+@media (max-width: 640px) {
+  .social-overlay .friends-panel,
+  .social-overlay .friend-chat {
+    padding: max(58px, calc(env(safe-area-inset-top) + 12px)) 12px
+      max(82px, calc(env(safe-area-inset-bottom) + 68px));
+  }
+  .friends-panel > header,
+  .friend-chat > header,
+  .profile-view-panel > header {
+    flex: 0 0 auto;
+    min-height: 48px;
+    padding-bottom: 9px;
+  }
+  .profile-view-panel > header b {
+    font-size: 17px;
+  }
+  .visible-back {
+    min-width: 68px !important;
+    min-height: 44px;
+    padding: 0 8px !important;
+  }
+  .profile-details {
+    flex: 0 0 auto;
+    justify-content: flex-start;
+    padding: 18px 6px 10px;
+  }
+  .profile-details > .profile-avatar,
+  .profile-avatar-edit .profile-avatar {
+    width: 82px;
+    height: 82px;
+    margin-bottom: 9px;
+    font-size: 50px !important;
+  }
+  .profile-avatar-edit > svg {
+    width: 27px;
+    height: 27px;
+    padding: 6px;
+  }
+  .profile-details .mini-label {
+    font-size: 9px;
+  }
+  .profile-details h2 {
+    margin-top: 5px;
+    font-size: clamp(24px, 8vw, 30px);
+  }
+  .profile-social-counts {
+    gap: 7px;
+    margin-top: 10px;
+  }
+  .profile-social-counts span {
+    min-height: 62px;
+    padding: 8px 5px;
+    border-radius: 13px;
+  }
+  .profile-social-counts b {
+    font-size: 15px;
+  }
+  .profile-facts {
+    gap: 7px;
+    margin-top: 12px;
+  }
+  .profile-facts > div {
+    min-height: 56px;
+    padding: 7px;
+    border-radius: 13px;
+  }
+  .profile-reels,
+  .social-connections {
+    margin-top: 14px;
+  }
+  .my-profile-page {
+    padding-bottom: 96px;
+  }
+  .social-overlay button,
+  .topbar button,
+  .language-switcher button {
+    touch-action: manipulation;
+  }
+  .social-overlay input,
+  .social-overlay select,
+  .social-overlay textarea {
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .language-switcher {
+    inset-inline-end: max(8px, env(safe-area-inset-right));
+    bottom: max(8px, env(safe-area-inset-bottom));
+    padding: 3px;
+  }
+  .language-switcher button {
+    min-height: 36px;
+    padding-inline: 9px;
+  }
+}
+
+@media (max-width: 390px) {
+  .social-overlay .friends-panel,
+  .social-overlay .friend-chat {
+    padding-inline: 10px;
+  }
+  .profile-details {
+    padding-top: 12px;
+  }
+  .profile-details > .profile-avatar,
+  .profile-avatar-edit .profile-avatar {
+    width: 74px;
+    height: 74px;
+    font-size: 45px !important;
+  }
+  .profile-social-counts span {
+    min-height: 56px;
   }
 }

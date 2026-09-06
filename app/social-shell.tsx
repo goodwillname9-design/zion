@@ -266,7 +266,7 @@ function ProfileDetails({
   );
 }
 
-function SocialConnections({ user }: { user: User }) {
+function SocialConnections({ profileId }: { profileId: string }) {
   const [mode, setMode] = useState<"followers" | "following">("followers");
   const [people, setPeople] = useState<ZionProfile[]>([]);
   useEffect(() => {
@@ -278,11 +278,11 @@ function SocialConnections({ user }: { user: User }) {
           ? await client
               .from("profile_follows")
               .select("follower_id")
-              .eq("following_id", user.id)
+              .eq("following_id", profileId)
           : await client
               .from("profile_follows")
               .select("following_id")
-              .eq("follower_id", user.id);
+              .eq("follower_id", profileId);
       const ids = (data ?? []).map((row) =>
         mode === "followers"
           ? (row as { follower_id: string }).follower_id
@@ -297,7 +297,7 @@ function SocialConnections({ user }: { user: User }) {
         .in("id", ids);
       setPeople((profiles as ZionProfile[] | null) ?? []);
     })();
-  }, [mode, user.id]);
+  }, [mode, profileId]);
   return (
     <section className="social-connections">
       <div>
@@ -340,6 +340,12 @@ export function SocialShell() {
   const [notificationPrompt, setNotificationPrompt] = useState(false);
   const [notificationToast, setNotificationToast] = useState("");
   const [notificationCount, setNotificationCount] = useState(0);
+  const notificationSeenAtRef = useRef(
+    typeof window === "undefined"
+      ? "1970-01-01T00:00:00.000Z"
+      : localStorage.getItem("zion-notifications-seen-at") ??
+          "1970-01-01T00:00:00.000Z",
+  );
   const [openingIntro, setOpeningIntro] = useState(true);
   const [encryptionState, setEncryptionState] = useState<
     "idle" | "checking" | "ready" | "locked"
@@ -362,7 +368,7 @@ export function SocialShell() {
         supabase
           .from("profiles")
           .select(
-            "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,profile_edit_used,is_admin,last_seen_at,follower_base_count",
+            "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,profile_edit_used,is_admin,last_seen_at,follower_base_count,is_private",
           )
           .eq("id", nextUser.id)
           .maybeSingle(),
@@ -454,18 +460,22 @@ export function SocialShell() {
           .from("friendships")
           .select("id", { count: "exact", head: true })
           .eq("addressee_id", user.id)
-          .eq("status", "pending"),
+          .eq("status", "pending")
+          .gt("created_at", notificationSeenAtRef.current),
         client
           .from("friend_games")
           .select("id", { count: "exact", head: true })
           .contains("participant_ids", [user.id])
           .not("accepted_ids", "cs", `{${user.id}}`)
-          .eq("status", "pending"),
+          .eq("status", "pending")
+          .gt("created_at", notificationSeenAtRef.current),
         client
           .from("zion_notifications")
           .select("id", { count: "exact", head: true })
           .eq("recipient_id", user.id)
-          .is("read_at", null),
+          .is("read_at", null)
+          .neq("kind", "profile_follow_request")
+          .gt("created_at", notificationSeenAtRef.current),
       ]);
       setNotificationCount(
         (friendRequests.count ?? 0) +
@@ -645,6 +655,10 @@ export function SocialShell() {
           setFriendsOpen(true);
         }}
         onOpenNotifications={() => {
+          const seenAt = new Date().toISOString();
+          notificationSeenAtRef.current = seenAt;
+          localStorage.setItem("zion-notifications-seen-at", seenAt);
+          setNotificationCount(0);
           setFriendsInitialTab("notifications");
           setFriendsOpen(true);
         }}
@@ -674,6 +688,9 @@ export function SocialShell() {
           profile={profile}
           initialTab={friendsInitialTab}
           onProfileUpdated={setProfile}
+          onNotificationsSeen={(count) =>
+            setNotificationCount((current) => Math.max(0, current - count))
+          }
           onClose={() => setFriendsOpen(false)}
         />
       ) : null}
@@ -1276,6 +1293,7 @@ function FriendsPanel({
   profile,
   initialTab,
   onProfileUpdated,
+  onNotificationsSeen,
   onClose,
 }: {
   user: User;
@@ -1283,6 +1301,7 @@ function FriendsPanel({
   initialTab:
     "friends" | "notifications" | "profile" | "communities" | "find" | "games";
   onProfileUpdated: (profile: ZionProfile) => void;
+  onNotificationsSeen: (count: number) => void;
   onClose: () => void;
 }) {
   const [friendships, setFriendships] = useState<Friendship[]>([]);
@@ -1292,6 +1311,7 @@ function FriendsPanel({
   const waitingAcceptedGamesRef = useRef(new Set<string>());
   const [profiles, setProfiles] = useState<Record<string, ZionProfile>>({});
   const [pins, setPins] = useState<string[]>([]);
+  const [lastMessageAt, setLastMessageAt] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Friendship | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
@@ -1322,6 +1342,7 @@ function FriendsPanel({
   const [allowCalls, setAllowCalls] = useState(true);
   const [showCountry, setShowCountry] = useState(true);
   const [showOnline, setShowOnline] = useState(true);
+  const [isPrivate, setIsPrivate] = useState(Boolean(profile.is_private));
   const [editUsername, setEditUsername] = useState(profile.username);
   const [editCountry, setEditCountry] = useState(profile.country);
   const [followingIds, setFollowingIds] = useState<string[]>([]);
@@ -1340,6 +1361,7 @@ function FriendsPanel({
       postCount,
       followerCount,
       followingCount,
+      { data: recentMessages },
       { data: inviteRows },
       { data: activityRows },
     ] = await Promise.all([
@@ -1352,7 +1374,7 @@ function FriendsPanel({
       supabase.from("friend_pins").select("friend_id").eq("user_id", user.id),
       supabase
         .from("profiles")
-        .select("allow_audio_calls,show_country,show_online_status")
+        .select("allow_audio_calls,show_country,show_online_status,is_private")
         .eq("id", user.id)
         .single(),
       supabase
@@ -1371,6 +1393,11 @@ function FriendsPanel({
         .from("profile_follows")
         .select("following_id", { count: "exact", head: true })
         .eq("follower_id", user.id),
+      supabase
+        .from("friend_messages")
+        .select("friendship_id,created_at")
+        .order("created_at", { ascending: false })
+        .limit(500),
       supabase
         .from("friend_games")
         .select(
@@ -1391,6 +1418,12 @@ function FriendsPanel({
     setFriendships(list);
     setPins((pinRows ?? []).map((item) => item.friend_id));
     setFollowingIds((followingRows ?? []).map((item) => item.following_id));
+    const recentByFriendship: Record<string, string> = {};
+    for (const message of recentMessages ?? []) {
+      if (!recentByFriendship[message.friendship_id])
+        recentByFriendship[message.friendship_id] = message.created_at;
+    }
+    setLastMessageAt(recentByFriendship);
     setSocialCounts({
       posts: postCount.count ?? 0,
       followers: followerCount.count ?? 0,
@@ -1413,6 +1446,7 @@ function FriendsPanel({
       setAllowCalls(privacy.allow_audio_calls);
       setShowCountry(privacy.show_country);
       setShowOnline(privacy.show_online_status);
+      setIsPrivate(Boolean(privacy.is_private));
     }
     const ids = [
       ...new Set(
@@ -1426,7 +1460,7 @@ function FriendsPanel({
       const { data } = await supabase
         .from("profiles")
         .select(
-          "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,is_admin,last_seen_at,follower_base_count",
+          "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,allow_audio_calls,show_country,show_online_status,is_admin,last_seen_at,follower_base_count,is_private",
         )
         .in("id", ids);
       setProfiles(
@@ -1471,6 +1505,11 @@ function FriendsPanel({
       )
       .on(
         "postgres_changes",
+        { event: "*", schema: "public", table: "friend_messages" },
+        refresh,
+      )
+      .on(
+        "postgres_changes",
         {
           event: "*",
           schema: "public",
@@ -1487,22 +1526,31 @@ function FriendsPanel({
     };
   }, [load, user.id]);
   useEffect(() => {
-    if (
-      activeTab !== "notifications" ||
-      !supabase ||
-      !activityNotices.some((x) => !x.read_at)
-    )
-      return;
+    if (activeTab !== "notifications" || !supabase) return;
+    const unread = activityNotices.filter(
+      (notice) => !notice.read_at && notice.kind !== "profile_follow_request",
+    );
+    if (!unread.length) return;
     const timer = window.setTimeout(() => {
+      const readAt = new Date().toISOString();
+      setActivityNotices((current) =>
+        current.map((notice) =>
+          !notice.read_at && notice.kind !== "profile_follow_request"
+            ? { ...notice, read_at: readAt }
+            : notice,
+        ),
+      );
+      onNotificationsSeen(unread.length);
       void supabase!
         .from("zion_notifications")
-        .update({ read_at: new Date().toISOString() })
-        .eq("recipient_id", user.id)
-        .is("read_at", null)
-        .neq("kind", "profile_follow_request");
-    }, 1200);
+        .update({ read_at: readAt })
+        .in(
+          "id",
+          unread.map((notice) => notice.id),
+        );
+    }, 350);
     return () => window.clearTimeout(timer);
-  }, [activeTab, activityNotices, user.id]);
+  }, [activeTab, activityNotices, onNotificationsSeen]);
   const otherId = useCallback(
     (item: Friendship) =>
       item.requester_id === user.id ? item.addressee_id : item.requester_id,
@@ -1582,12 +1630,16 @@ function FriendsPanel({
             Number(pins.includes(otherId(b))) -
             Number(pins.includes(otherId(a)));
           if (pinOrder) return pinOrder;
+          const latestMessageOrder =
+            new Date(lastMessageAt[b.id] ?? 0).getTime() -
+            new Date(lastMessageAt[a.id] ?? 0).getTime();
+          if (latestMessageOrder) return latestMessageOrder;
           return (
             new Date(b.accepted_at ?? b.created_at).getTime() -
             new Date(a.accepted_at ?? a.created_at).getTime()
           );
         }),
-    [friendships, otherId, pins],
+    [friendships, lastMessageAt, otherId, pins],
   );
   const pendingRequests = useMemo(
     () =>
@@ -1612,6 +1664,7 @@ function FriendsPanel({
         allow_audio_calls: allowCalls,
         show_country: showCountry,
         show_online_status: showOnline,
+        is_private: isPrivate,
       })
       .eq("id", user.id);
     setSettingsOpen(false);
@@ -1771,6 +1824,7 @@ function FriendsPanel({
             {followingIds.includes(inspectedProfile.id) ? "Unfollow" : "Follow"}
           </button>
           <ProfileReels user={user} profile={inspectedProfile} />
+          <SocialConnections profileId={inspectedProfile.id} />
         </section>
       </div>
     );
@@ -1881,6 +1935,21 @@ function FriendsPanel({
             </button>
           </div>
           <h3>Privacy & Security</h3>
+          <label className="setting-row account-privacy-row">
+            <span>
+              <b>{isPrivate ? "Private account" : "Public account"}</b>
+              <small>
+                {isPrivate
+                  ? "Only approved followers can view your profile posts"
+                  : "Anyone can view your profile posts and follow instantly"}
+              </small>
+            </span>
+            <input
+              type="checkbox"
+              checked={isPrivate}
+              onChange={(event) => setIsPrivate(event.target.checked)}
+            />
+          </label>
           <label className="setting-row">
             <span>
               <b>Audio call requests</b>
@@ -2186,7 +2255,7 @@ function FriendsPanel({
               Edit photo, name &amp; country
             </button>
             <ProfileReels user={user} profile={profile} />
-            <SocialConnections user={user} />
+            <SocialConnections profileId={user.id} />
           </div>
         ) : activeTab === "find" ? (
           <div className="find-friends">
@@ -2968,7 +3037,7 @@ function FriendChat({
   const [uploading, setUploading] = useState(false);
   const [friendUploadProgress, setFriendUploadProgress] = useState(0);
   const [recording, setRecording] = useState(false);
-  const [sendViewOnce, setSendViewOnce] = useState(false);
+  const [mediaChoice, setMediaChoice] = useState<File | null>(null);
   const [openedOnceIds, setOpenedOnceIds] = useState<number[]>([]);
   const [messageMenu, setMessageMenu] = useState<FriendMessage | null>(null);
   const [mediaPreview, setMediaPreview] = useState<FriendMessage | null>(null);
@@ -3370,7 +3439,7 @@ function FriendChat({
       );
     }
   };
-  const upload = async (file?: File, forceViewOnce = sendViewOnce) => {
+  const upload = async (file?: File, forceViewOnce = false) => {
     if (!supabase || !file || !friendId) return;
     if (file.size > 250 * 1024 * 1024) {
       alert("Maximum encrypted media size is 250 MB.");
@@ -3428,7 +3497,7 @@ function FriendChat({
     setUploading(false);
     setFriendUploadProgress(0);
     setReplyTo(null);
-    setSendViewOnce(false);
+    setMediaChoice(null);
     await load();
   };
   const toggleVoiceRecording = async () => {
@@ -3603,6 +3672,7 @@ function FriendChat({
           </header>
           <ProfileDetails profile={friend} label="Friend Profile" />
           <ProfileReels user={user} profile={friend} />
+          <SocialConnections profileId={friend.id} />
           <div className="profile-status-row">
             <i className={friendOnline ? "online" : "offline"} />
             <b>
@@ -3790,8 +3860,8 @@ function FriendChat({
                 }}
                 className={
                   item.sender_id === user.id
-                    ? "friend-bubble mine"
-                    : "friend-bubble theirs"
+                    ? `friend-bubble mine ${item.media_url ? "has-media" : ""}`
+                    : `friend-bubble theirs ${item.media_url ? "has-media" : ""}`
                 }
               >
                 {quoted ? (
@@ -3803,6 +3873,14 @@ function FriendChat({
                         : (quoted.display_message ??
                           (quoted.media_type === "image" ? "Photo" : "Video"))}
                     </span>
+                  </div>
+                ) : null}
+                {!item.deleted_at &&
+                item.view_once &&
+                item.sender_id === user.id ? (
+                  <div className="view-once-sent">
+                    <ImagePlus />
+                    <span>View-once photo sent</span>
                   </div>
                 ) : null}
                 {!item.deleted_at &&
@@ -3822,9 +3900,7 @@ function FriendChat({
                 {!item.deleted_at &&
                 item.media_url &&
                 item.media_type === "image" &&
-                (!item.view_once ||
-                  item.sender_id === user.id ||
-                  openedOnceIds.includes(item.id)) ? (
+                (!item.view_once || openedOnceIds.includes(item.id)) ? (
                   <img
                     src={item.media_url}
                     alt="Shared attachment"
@@ -3934,7 +4010,13 @@ function FriendChat({
             hidden
             type="file"
             accept="image/*,video/mp4,video/webm,video/quicktime"
-            onChange={(event) => void upload(event.target.files?.[0])}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (!file) return;
+              if (file.type.startsWith("image/")) setMediaChoice(file);
+              else void upload(file, false);
+            }}
           />
           <button
             className="media-button"
@@ -3944,14 +4026,6 @@ function FriendChat({
           >
             <ImagePlus />
             <span>{uploading ? `${friendUploadProgress}%` : "Gallery"}</span>
-          </button>
-          <button
-            className={`view-once-toggle ${sendViewOnce ? "active" : ""}`}
-            type="button"
-            title="Send next photo as view once"
-            onClick={() => setSendViewOnce((value) => !value)}
-          >
-            ①
           </button>
           <input
             value={text}
@@ -3984,6 +4058,20 @@ function FriendChat({
             {recording ? <MicOff /> : <Mic />}
           </button>
         </div>
+        {mediaChoice ? (
+          <div className="media-choice-overlay" onClick={() => setMediaChoice(null)}>
+            <div className="media-choice-sheet" onClick={(event) => event.stopPropagation()}>
+              <b>Send photo</b>
+              <button onClick={() => void upload(mediaChoice, false)}>
+                Send normally
+              </button>
+              <button className="view-once" onClick={() => void upload(mediaChoice, true)}>
+                View once · receiver only
+              </button>
+              <button onClick={() => setMediaChoice(null)}>Cancel</button>
+            </div>
+          </div>
+        ) : null}
         {messageMenu ? (
           <div
             className="message-menu-overlay"

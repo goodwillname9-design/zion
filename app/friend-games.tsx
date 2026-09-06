@@ -497,29 +497,6 @@ export function FriendGames({
           Send game invitation
         </button>
       </div>
-      <h3>Recent games</h3>
-      <div className="game-list">
-        {games
-          .filter((game) => game.status !== "pending")
-          .map((game) => (
-            <button key={game.id} onClick={() => setSelected(game)}>
-              <span>
-                {game.game_type === "ludo"
-                  ? "🎲"
-                  : game.game_type === "chess"
-                    ? "♛"
-                    : "✕○"}
-              </span>
-              <div>
-                <b>{labels[game.game_type]}</b>
-                <small>
-                  {friendFor(game)?.username ?? "Friend"} · {game.status}
-                </small>
-              </div>
-              <strong>Open</strong>
-            </button>
-          ))}
-      </div>
       {notice ? <p className="game-notice">{notice}</p> : null}
     </div>
   );

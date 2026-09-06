@@ -54,6 +54,7 @@ export type ZionProfile = {
   is_admin?: boolean;
   last_seen_at?: string;
   follower_base_count?: number;
+  is_private?: boolean;
 };
 
 export function Experience({
