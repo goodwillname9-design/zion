@@ -483,6 +483,35 @@ input {
   font-size: 20px;
   font-weight: 900;
 }
+.game-finished-actions {
+  width: min(520px, 100%);
+  margin: 0 auto 16px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.game-finished-actions button {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 15px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
+  font-weight: 900;
+  cursor: pointer;
+}
+.game-finished-actions .play-again {
+  color: #171328;
+  border-color: #d9ff83;
+  background: linear-gradient(135deg, #d9ff83, #63f2bd);
+}
+.game-finished-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .tic-board {
   width: min(430px, 100%);
   aspect-ratio: 1;
@@ -725,6 +754,24 @@ input {
   width: 18px;
   height: 18px;
   accent-color: #d9ff83;
+}
+.ludo-count-picker {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+}
+.ludo-count-picker button {
+  min-height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 11px;
+  color: #aaa3b8;
+  background: rgba(255, 255, 255, 0.04);
+  font-weight: 850;
+}
+.ludo-count-picker button.active {
+  color: #171328;
+  border-color: #d9ff83;
+  background: #d9ff83;
 }
 .ludo-token.movable {
   cursor: pointer;
@@ -2863,13 +2910,14 @@ footer span {
 }
 
 .profile-social-counts {
-  display: flex;
-  justify-content: center;
+  width: min(100%, 430px);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin: 12px 0 4px;
 }
 .profile-social-counts span {
-  min-width: 96px;
+  min-width: 0;
   display: grid;
   gap: 2px;
   padding: 10px 14px;
@@ -3945,6 +3993,48 @@ footer span {
   font-size: 70px !important;
   box-shadow: 0 18px 45px rgba(109, 242, 193, 0.15);
 }
+.profile-avatar-edit {
+  position: relative;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #171328;
+  background: none;
+  cursor: pointer;
+}
+.profile-avatar-edit .profile-avatar {
+  width: 112px;
+  height: 112px;
+  font-size: 70px !important;
+}
+.profile-avatar-edit > svg {
+  position: absolute;
+  right: 0;
+  bottom: 3px;
+  width: 31px;
+  height: 31px;
+  padding: 7px;
+  border: 3px solid #18172e;
+  border-radius: 50%;
+  background: #d9ff83;
+}
+.visible-back {
+  width: auto !important;
+  min-width: 76px !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 10px !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 12px !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+}
+.visible-back span {
+  display: inline !important;
+  font-size: 11px;
+  font-weight: 850;
+}
 .profile-details h2 {
   margin: 8px 0 2px;
   font-size: 30px;
@@ -4669,13 +4759,13 @@ html[data-theme="day"] .friend-chat small {
 
 @supports (padding-top: env(safe-area-inset-top)) {
   .topbar {
-    padding-top: max(14px, env(safe-area-inset-top));
+    padding-top: max(18px, calc(env(safe-area-inset-top) + 8px));
   }
   .friends-panel,
   .friend-chat,
   .reels-overlay,
   .game-room {
-    padding-top: max(18px, calc(env(safe-area-inset-top) + 10px));
+    padding-top: max(22px, calc(env(safe-area-inset-top) + 16px));
   }
   .reels-overlay > header,
   .game-room header {
@@ -4746,6 +4836,11 @@ html[data-theme="day"] .friend-chat small {
 .admin-list {
   display: grid;
   gap: 8px;
+  max-height: calc(100dvh - 285px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 .admin-row {
   display: grid;

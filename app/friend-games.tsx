@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Chess } from "chess.js";
-import { ArrowLeft, Crown, Gamepad2, Swords } from "lucide-react";
+import { ArrowLeft, Crown, Gamepad2, RotateCcw, Swords } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 
 import { supabase } from "@/lib/supabase";
@@ -65,6 +65,7 @@ export function FriendGames({
   const [ludoFriendships, setLudoFriendships] = useState<string[]>(
     friends[0]?.friendshipId ? [friends[0].friendshipId] : [],
   );
+  const [ludoPlayerCount, setLudoPlayerCount] = useState<2 | 3 | 4>(2);
   const [gameType, setGameType] = useState<GameType>("ludo");
   const [busy, setBusy] = useState(false);
   const [moveBusy, setMoveBusy] = useState(false);
@@ -106,10 +107,20 @@ export function FriendGames({
         (event) => {
           const incoming = event.new as GameRow;
           if (!incoming?.id) return void load();
-          setGames((current) => [
-            incoming,
-            ...current.filter((item) => item.id !== incoming.id),
-          ]);
+          setGames((current) => {
+            const previous = current.find((item) => item.id === incoming.id);
+            if (
+              incoming.status === "active" &&
+              previous?.status === "pending" &&
+              incoming.participant_ids.includes(user.id)
+            ) {
+              window.setTimeout(() => setSelected(incoming), 0);
+            }
+            return [
+              incoming,
+              ...current.filter((item) => item.id !== incoming.id),
+            ];
+          });
           setSelected((current) =>
             current?.id === incoming.id ? incoming : current,
           );
@@ -153,11 +164,21 @@ export function FriendGames({
   const invite = async () => {
     if (!supabase || busy) return;
     const chosenIds =
-      gameType === "ludo" ? ludoFriendships.slice(0, 3) : [friendshipId];
+      gameType === "ludo"
+        ? ludoFriendships.slice(0, ludoPlayerCount - 1)
+        : [friendshipId];
     const chosen = chosenIds
       .map((id) => friends.find((item) => item.friendshipId === id))
       .filter((item): item is GameFriend => Boolean(item));
-    if (!chosen.length) return;
+    if (
+      !chosen.length ||
+      (gameType === "ludo" && chosen.length !== ludoPlayerCount - 1)
+    ) {
+      setNotice(
+        `Choose exactly ${ludoPlayerCount - 1} friend${ludoPlayerCount > 2 ? "s" : ""} for a ${ludoPlayerCount}-player Ludo game.`,
+      );
+      return;
+    }
     const players = [user.id, ...chosen.map((item) => item.profile.id)];
     setBusy(true);
     setNotice("");
@@ -185,14 +206,44 @@ export function FriendGames({
     if (error) return setNotice(error.message);
     if (accept) {
       const fresh = Array.isArray(data) ? data[0] : data;
-      setSelected(
-        (fresh as GameRow | null) ?? {
-          ...game,
-          accepted_ids: [...game.accepted_ids, user.id],
-        },
-      );
+      const acceptedGame = (fresh as GameRow | null) ?? {
+        ...game,
+        accepted_ids: [...game.accepted_ids, user.id],
+      };
+      if (acceptedGame.status === "active") setSelected(acceptedGame);
+      else setNotice("Accepted. Waiting for the other invited players…");
     }
     await load();
+  };
+
+  const playAgain = async (game: GameRow) => {
+    if (!supabase || busy) return;
+    const otherPlayers = game.participant_ids.filter((id) => id !== user.id);
+    if (!otherPlayers.length) return;
+    const players = [user.id, ...otherPlayers];
+    setBusy(true);
+    setNotice("");
+    const { data, error } = await supabase
+      .from("friend_games")
+      .insert({
+        friendship_id: game.friendship_id,
+        inviter_id: user.id,
+        opponent_id: otherPlayers[0],
+        participant_ids: players,
+        accepted_ids: [user.id],
+        game_type: game.game_type,
+        state: initialState(game.game_type, players),
+        current_turn: user.id,
+      })
+      .select("id")
+      .single();
+    setBusy(false);
+    if (error) return setNotice(error.message);
+    setSelected(null);
+    setNotice(
+      `${labels[game.game_type]} Play Again invitation sent. It starts when ${otherPlayers.length === 1 ? "your friend accepts" : "all invited friends accept"}.`,
+    );
+    if (data?.id) await load();
   };
 
   const saveMove = async (
@@ -280,14 +331,28 @@ export function FriendGames({
           </div>
         ) : null}
         {selected.status === "finished" ? (
-          <div className="game-result">
-            <Crown />
-            {selected.winner_id
-              ? selected.winner_id === user.id
-                ? "You won!"
-                : `${friend?.username ?? "Your friend"} won`
-              : "Draw game"}
-          </div>
+          <>
+            <div className="game-result">
+              <Crown />
+              {selected.winner_id
+                ? selected.winner_id === user.id
+                  ? "You won!"
+                  : `${friend?.username ?? "Your friend"} won`
+                : "Draw game"}
+            </div>
+            <div className="game-finished-actions">
+              <button onClick={() => setSelected(null)}>
+                <ArrowLeft /> Back
+              </button>
+              <button
+                className="play-again"
+                disabled={busy}
+                onClick={() => void playAgain(selected)}
+              >
+                <RotateCcw /> {busy ? "Sending…" : "Play Again"}
+              </button>
+            </div>
+          </>
         ) : null}
         {selected.status !== "pending" &&
         selected.game_type === "tic_tac_toe" ? (
@@ -362,7 +427,29 @@ export function FriendGames({
         </div>
         {gameType === "ludo" ? (
           <div className="ludo-player-picker">
-            <b>Invite up to 3 friends ({ludoFriendships.length}/3)</b>
+            <b>Number of players</b>
+            <div className="ludo-count-picker">
+              {([2, 3, 4] as const).map((count) => (
+                <button
+                  type="button"
+                  key={count}
+                  className={ludoPlayerCount === count ? "active" : ""}
+                  onClick={() => {
+                    setLudoPlayerCount(count);
+                    setLudoFriendships((current) =>
+                      current.slice(0, count - 1),
+                    );
+                  }}
+                >
+                  {count} Players
+                </button>
+              ))}
+            </div>
+            <b>
+              Choose {ludoPlayerCount - 1} friend
+              {ludoPlayerCount > 2 ? "s" : ""} ({ludoFriendships.length}/
+              {ludoPlayerCount - 1})
+            </b>
             {friends.map((item) => (
               <label key={item.friendshipId}>
                 <input
@@ -372,7 +459,7 @@ export function FriendGames({
                     setLudoFriendships((current) =>
                       current.includes(item.friendshipId)
                         ? current.filter((id) => id !== item.friendshipId)
-                        : current.length < 3
+                        : current.length < ludoPlayerCount - 1
                           ? [...current, item.friendshipId]
                           : current,
                     )
@@ -399,7 +486,12 @@ export function FriendGames({
         )}
         <button
           className="send-game-invite"
-          disabled={!friends.length || busy}
+          disabled={
+            !friends.length ||
+            busy ||
+            (gameType === "ludo" &&
+              ludoFriendships.length !== ludoPlayerCount - 1)
+          }
           onClick={() => void invite()}
         >
           Send game invitation

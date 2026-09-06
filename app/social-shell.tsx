@@ -190,11 +190,15 @@ function ProfileDetails({
   label = "ZION Profile",
   followerCount = 0,
   followingCount = 0,
+  postCount = 0,
+  onAvatarClick,
 }: {
   profile: ZionProfile;
   label?: string;
   followerCount?: number;
   followingCount?: number;
+  postCount?: number;
+  onAvatarClick?: () => void;
 }) {
   const joined = profile.created_at
     ? new Intl.DateTimeFormat(undefined, { dateStyle: "long" }).format(
@@ -203,7 +207,19 @@ function ProfileDetails({
     : "Not available";
   return (
     <div className="profile-details">
-      <ProfileAvatar profile={profile} />
+      {onAvatarClick ? (
+        <button
+          className="profile-avatar-edit"
+          type="button"
+          onClick={onAvatarClick}
+          aria-label="Change profile photo"
+        >
+          <ProfileAvatar profile={profile} />
+          <Camera />
+        </button>
+      ) : (
+        <ProfileAvatar profile={profile} />
+      )}
       <span className="mini-label">{label}</span>
       <h2>{profile.username}</h2>
       {profile.is_admin ? (
@@ -211,6 +227,10 @@ function ProfileDetails({
       ) : null}
       <p className="profile-handle">@{profile.username}</p>
       <div className="profile-social-counts">
+        <span>
+          <b>{postCount}</b>
+          <small>Posts</small>
+        </span>
         <span>
           <b>
             {new Intl.NumberFormat(undefined, {
@@ -1268,6 +1288,7 @@ function FriendsPanel({
   const [gameInvites, setGameInvites] = useState<GameInvite[]>([]);
   const [activityNotices, setActivityNotices] = useState<ActivityNotice[]>([]);
   const [gameToOpen, setGameToOpen] = useState<string | null>(null);
+  const waitingAcceptedGamesRef = useRef(new Set<string>());
   const [profiles, setProfiles] = useState<Record<string, ZionProfile>>({});
   const [pins, setPins] = useState<string[]>([]);
   const [selected, setSelected] = useState<Friendship | null>(null);
@@ -1301,6 +1322,7 @@ function FriendsPanel({
   const [editCountry, setEditCountry] = useState(profile.country);
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [socialCounts, setSocialCounts] = useState({
+    posts: 0,
     followers: 0,
     following: 0,
   });
@@ -1311,6 +1333,7 @@ function FriendsPanel({
       { data: pinRows },
       { data: privacy },
       { data: followingRows },
+      postCount,
       followerCount,
       followingCount,
       { data: inviteRows },
@@ -1332,6 +1355,10 @@ function FriendsPanel({
         .from("profile_follows")
         .select("following_id")
         .eq("follower_id", user.id),
+      supabase
+        .from("zion_reels")
+        .select("id", { count: "exact", head: true })
+        .eq("owner_id", user.id),
       supabase
         .from("profile_follows")
         .select("follower_id", { count: "exact", head: true })
@@ -1361,6 +1388,7 @@ function FriendsPanel({
     setPins((pinRows ?? []).map((item) => item.friend_id));
     setFollowingIds((followingRows ?? []).map((item) => item.following_id));
     setSocialCounts({
+      posts: postCount.count ?? 0,
       followers: followerCount.count ?? 0,
       following: followingCount.count ?? 0,
     });
@@ -1413,7 +1441,19 @@ function FriendsPanel({
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "friend_games" },
-        refresh,
+        (payload) => {
+          const game = payload.new as GameInvite;
+          if (
+            game?.status === "active" &&
+            game.participant_ids?.includes(user.id) &&
+            waitingAcceptedGamesRef.current.has(game.id)
+          ) {
+            waitingAcceptedGamesRef.current.delete(game.id);
+            setGameToOpen(game.id);
+            setActiveTab("games");
+          }
+          refresh();
+        },
       )
       .subscribe();
     return () => {
@@ -1465,14 +1505,24 @@ function FriendsPanel({
     acceptInvite: boolean,
   ) => {
     if (!supabase) return;
-    const { error } = await supabase.rpc("respond_zion_game", {
+    const { data, error } = await supabase.rpc("respond_zion_game", {
       p_game_id: game.id,
       p_accept: acceptInvite,
     });
     if (error) return alert(error.message);
     if (acceptInvite) {
-      setGameToOpen(game.id);
-      setActiveTab("games");
+      const updated = (
+        Array.isArray(data) ? data[0] : data
+      ) as GameInvite | null;
+      if (updated?.status === "active") {
+        setGameToOpen(game.id);
+        setActiveTab("games");
+      } else {
+        waitingAcceptedGamesRef.current.add(game.id);
+        alert(
+          "Accepted. The game will open when every invited player accepts.",
+        );
+      }
     }
     await load();
   };
@@ -1697,8 +1747,11 @@ function FriendsPanel({
                 <small>@{profile.username}</small>
               </div>
             </div>
-            <button onClick={() => setSettingsOpen(false)}>
-              <X />
+            <button
+              className="visible-back"
+              onClick={() => setSettingsOpen(false)}
+            >
+              <ArrowLeft /> <span>Back</span>
             </button>
           </header>
           <div className="profile-summary">
@@ -1853,8 +1906,8 @@ function FriendsPanel({
           >
             <Settings />
           </button>
-          <button onClick={onClose} aria-label="Close">
-            <X />
+          <button className="visible-back" onClick={onClose} aria-label="Back">
+            <ArrowLeft /> <span>Back</span>
           </button>
         </header>
         <div className="friends-tabs">
@@ -2051,11 +2104,22 @@ function FriendsPanel({
           </div>
         ) : activeTab === "profile" ? (
           <div className="my-profile-page">
+            <input
+              ref={profileFileRef}
+              hidden
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={(event) =>
+                void uploadProfilePhoto(event.target.files?.[0])
+              }
+            />
             <ProfileDetails
               profile={profile}
               label="My ZION Profile"
               followerCount={socialCounts.followers}
               followingCount={socialCounts.following}
+              postCount={socialCounts.posts}
+              onAvatarClick={() => profileFileRef.current?.click()}
             />
             <button
               className="edit-profile-main"
@@ -2849,6 +2913,7 @@ function FriendChat({
   const [sendViewOnce, setSendViewOnce] = useState(false);
   const [openedOnceIds, setOpenedOnceIds] = useState<number[]>([]);
   const [friendOnline, setFriendOnline] = useState(false);
+  const [friendLastSeen, setFriendLastSeen] = useState(friend?.last_seen_at);
   const [friendTyping, setFriendTyping] = useState(false);
   const [replyTo, setReplyTo] = useState<FriendMessage | null>(null);
   const [showFriendProfile, setShowFriendProfile] = useState(false);
@@ -2876,6 +2941,20 @@ function FriendChat({
   const callTimeoutRef = useRef<number | null>(null);
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
   const mediaUrlsRef = useRef(new Map<string, string>());
+  useEffect(() => {
+    if (!supabase || !friendId) return;
+    const refresh = async () => {
+      const { data } = await supabase!
+        .from("profiles")
+        .select("last_seen_at")
+        .eq("id", friendId)
+        .maybeSingle();
+      if (data?.last_seen_at) setFriendLastSeen(data.last_seen_at);
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 30_000);
+    return () => window.clearInterval(timer);
+  }, [friendId]);
   const load = useCallback(async () => {
     if (!supabase || !friendId) return;
     await supabase.rpc("mark_friend_messages_read", {
@@ -3446,7 +3525,12 @@ function FriendChat({
           <ProfileReels user={user} profile={friend} />
           <div className="profile-status-row">
             <i className={friendOnline ? "online" : "offline"} />
-            <b>{lastSeenLabel(friend, friendOnline)}</b>
+            <b>
+              {lastSeenLabel(
+                friend ? { ...friend, last_seen_at: friendLastSeen } : friend,
+                friendOnline,
+              )}
+            </b>
           </div>
         </section>
       </div>
@@ -3479,7 +3563,7 @@ function FriendChat({
                   ? "Typing…"
                   : friendOnline
                     ? "Online now · Permanent chat"
-                    : `${lastSeenLabel(friend)} · Permanent chat`}
+                    : `${lastSeenLabel(friend ? { ...friend, last_seen_at: friendLastSeen } : friend)} · Permanent chat`}
             </small>
           </button>
           {callState !== "idle" ? (
