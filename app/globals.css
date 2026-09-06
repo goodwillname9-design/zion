@@ -5849,3 +5849,94 @@ html[data-theme="day"] .friend-chat small {
     padding: 0;
   }
 }
+
+/* V47 — compact, app-like game room on notched phones. */
+.game-room {
+  padding-top: clamp(12px, calc(env(safe-area-inset-top) + 8px), 64px);
+  scroll-padding-top: clamp(12px, calc(env(safe-area-inset-top) + 8px), 64px);
+}
+.game-room header {
+  top: 0;
+  margin-bottom: 10px;
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.28);
+}
+.ludo-game {
+  margin: 0 auto;
+}
+
+@media (max-width: 640px) {
+  .game-room {
+    padding-right: max(10px, env(safe-area-inset-right));
+    padding-bottom: max(88px, calc(env(safe-area-inset-bottom) + 72px));
+    padding-left: max(10px, env(safe-area-inset-left));
+  }
+  .game-room header {
+    width: 100%;
+    min-height: 66px;
+    margin: 0 auto 8px;
+    padding: 8px 10px;
+    border-radius: 20px;
+  }
+  .game-room header > button {
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+  }
+  .game-room header > div {
+    min-width: 0;
+    text-align: start;
+  }
+  .game-room header > div b {
+    font-size: 16px;
+  }
+  .game-room header > div small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .game-room header > span {
+    flex: 0 0 auto;
+    padding: 8px 10px;
+    white-space: nowrap;
+  }
+  .ludo-game {
+    width: 100%;
+  }
+  .ludo-board-pro {
+    width: min(100%, calc(100dvh - 258px));
+    min-width: 280px;
+    margin: 0 auto 10px;
+    border-width: 5px;
+    border-radius: 20px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+  }
+  .dice-button-pro {
+    min-width: 164px;
+    min-height: 64px;
+    padding: 6px 15px;
+    border-radius: 18px;
+  }
+  .dice-cube {
+    width: 46px;
+  }
+  .ludo-controls p {
+    margin-top: 7px;
+  }
+  .game-room ~ .language-switcher,
+  body:has(.game-room) .language-switcher {
+    opacity: 0.9;
+  }
+}
+
+@media (max-width: 380px), (max-height: 720px) {
+  .ludo-board-pro {
+    width: min(100%, calc(100dvh - 230px));
+    min-width: 250px;
+  }
+  .game-room header {
+    min-height: 58px;
+  }
+  .dice-button-pro {
+    min-height: 58px;
+  }
+}
