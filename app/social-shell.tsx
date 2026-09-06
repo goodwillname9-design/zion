@@ -18,6 +18,7 @@ import {
   Phone,
   PhoneOff,
   Pin,
+  Plus,
   Reply,
   Search,
   Send,
@@ -189,10 +190,13 @@ function ProfileAvatar({
 function ProfileDetails({
   profile,
   label = "ZION Profile",
-  followerCount = 0,
-  followingCount = 0,
-  postCount = 0,
+  followerCount,
+  followingCount,
+  postCount,
   onAvatarClick,
+  onFollowersClick,
+  onFollowingClick,
+  onPostsClick,
 }: {
   profile: ZionProfile;
   label?: string;
@@ -200,7 +204,27 @@ function ProfileDetails({
   followingCount?: number;
   postCount?: number;
   onAvatarClick?: () => void;
+  onFollowersClick?: () => void;
+  onFollowingClick?: () => void;
+  onPostsClick?: () => void;
 }) {
+  const [loadedCounts, setLoadedCounts] = useState({ posts: 0, followers: 0, following: 0 });
+  useEffect(() => {
+    if (!supabase || (postCount !== undefined && followerCount !== undefined && followingCount !== undefined)) return;
+    void (async () => {
+      const [posts, followers, following] = await Promise.all([
+        supabase!.from("zion_reels").select("id", { count: "exact", head: true }).eq("owner_id", profile.id),
+        supabase!.from("profile_follows").select("follower_id", { count: "exact", head: true }).eq("following_id", profile.id),
+        supabase!.from("profile_follows").select("following_id", { count: "exact", head: true }).eq("follower_id", profile.id),
+      ]);
+      setLoadedCounts({ posts: posts.count ?? 0, followers: followers.count ?? 0, following: following.count ?? 0 });
+    })();
+  }, [profile.id, postCount, followerCount, followingCount]);
+  const counts = {
+    posts: postCount ?? loadedCounts.posts,
+    followers: followerCount ?? loadedCounts.followers,
+    following: followingCount ?? loadedCounts.following,
+  };
   const joined = profile.created_at
     ? new Intl.DateTimeFormat(undefined, { dateStyle: "long" }).format(
         new Date(profile.created_at),
@@ -228,23 +252,23 @@ function ProfileDetails({
       ) : null}
       <p className="profile-handle">@{profile.username}</p>
       <div className="profile-social-counts">
-        <span>
-          <b>{postCount}</b>
+        <button type="button" onClick={onPostsClick} disabled={!onPostsClick}>
+          <b>{counts.posts}</b>
           <small>Posts</small>
-        </span>
-        <span>
+        </button>
+        <button type="button" onClick={onFollowersClick} disabled={!onFollowersClick}>
           <b>
             {new Intl.NumberFormat(undefined, {
               notation: "compact",
               maximumFractionDigits: 1,
-            }).format(followerCount + (profile.follower_base_count ?? 0))}
+            }).format(counts.followers + (profile.follower_base_count ?? 0))}
           </b>
           <small>Followers</small>
-        </span>
-        <span>
-          <b>{followingCount}</b>
+        </button>
+        <button type="button" onClick={onFollowingClick} disabled={!onFollowingClick}>
+          <b>{counts.following}</b>
           <small>Following</small>
-        </span>
+        </button>
       </div>
       <div className="profile-facts">
         <div>
@@ -266,8 +290,8 @@ function ProfileDetails({
   );
 }
 
-function SocialConnections({ profileId }: { profileId: string }) {
-  const [mode, setMode] = useState<"followers" | "following">("followers");
+function SocialConnections({ profileId, initialMode = "followers" }: { profileId: string; initialMode?: "followers" | "following" }) {
+  const [mode, setMode] = useState<"followers" | "following">(initialMode);
   const [people, setPeople] = useState<ZionProfile[]>([]);
   useEffect(() => {
     if (!supabase) return;
@@ -340,6 +364,7 @@ export function SocialShell() {
   const [notificationPrompt, setNotificationPrompt] = useState(false);
   const [notificationToast, setNotificationToast] = useState("");
   const [notificationCount, setNotificationCount] = useState(0);
+  const [friendUnreadCount, setFriendUnreadCount] = useState(0);
   const notificationSeenAtRef = useRef(
     typeof window === "undefined"
       ? "1970-01-01T00:00:00.000Z"
@@ -455,7 +480,7 @@ export function SocialShell() {
     if (!supabase || !user || !profile) return;
     const client = supabase;
     const refreshNotificationCount = async () => {
-      const [friendRequests, gameInvites, activities] = await Promise.all([
+      const [friendRequests, gameInvites, activities, unreadMessages] = await Promise.all([
         client
           .from("friendships")
           .select("id", { count: "exact", head: true })
@@ -476,16 +501,40 @@ export function SocialShell() {
           .is("read_at", null)
           .neq("kind", "profile_follow_request")
           .gt("created_at", notificationSeenAtRef.current),
+        client
+          .from("friend_messages")
+          .select("id", { count: "exact", head: true })
+          .neq("sender_id", user.id)
+          .is("read_at", null),
       ]);
       setNotificationCount(
         (friendRequests.count ?? 0) +
           (gameInvites.count ?? 0) +
           (activities.count ?? 0),
       );
+      setFriendUnreadCount(unreadMessages.count ?? 0);
     };
     void refreshNotificationCount();
     const channel = client
       .channel(`friend-request-alerts-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "friend_messages" },
+        async (payload) => {
+          void refreshNotificationCount();
+          if (payload.eventType !== "INSERT") return;
+          const row = payload.new as { sender_id?: string };
+          if (!row.sender_id || row.sender_id === user.id) return;
+          const { data: sender } = await client
+            .from("profiles")
+            .select("username,avatar")
+            .eq("id", row.sender_id)
+            .maybeSingle();
+          const name = sender?.username ?? "A friend";
+          setNotificationToast(`${sender?.avatar ?? "💬"} New message from ${name}`);
+          window.setTimeout(() => setNotificationToast(""), 5000);
+        },
+      )
       .on(
         "postgres_changes",
         {
@@ -650,6 +699,7 @@ export function SocialShell() {
     <>
       <Experience
         profile={profile}
+        friendUnreadCount={friendUnreadCount}
         onOpenFriends={() => {
           setFriendsInitialTab("friends");
           setFriendsOpen(true);
@@ -1313,6 +1363,11 @@ function FriendsPanel({
   const [pins, setPins] = useState<string[]>([]);
   const [lastMessageAt, setLastMessageAt] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Friendship | null>(null);
+  const [connectionView, setConnectionView] = useState<{
+    profileId: string;
+    username: string;
+    mode: "followers" | "following";
+  } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
     | "friends"
@@ -1803,7 +1858,7 @@ function FriendsPanel({
     await supabase.auth.signOut();
     onClose();
   };
-  if (inspectedProfile)
+  if (inspectedProfile && !connectionView)
     return (
       <div className="social-overlay">
         <section className="friends-panel profile-view-panel notification-profile-view">
@@ -1816,7 +1871,12 @@ function FriendsPanel({
             </button>
             <b>Profile</b>
           </header>
-          <ProfileDetails profile={inspectedProfile} label="ZION Profile" />
+          <ProfileDetails
+            profile={inspectedProfile}
+            label="ZION Profile"
+            onFollowersClick={() => setConnectionView({ profileId: inspectedProfile.id, username: inspectedProfile.username, mode: "followers" })}
+            onFollowingClick={() => setConnectionView({ profileId: inspectedProfile.id, username: inspectedProfile.username, mode: "following" })}
+          />
           <button
             className="edit-profile-main"
             onClick={() => void toggleFollow(inspectedProfile.id)}
@@ -1824,18 +1884,44 @@ function FriendsPanel({
             {followingIds.includes(inspectedProfile.id) ? "Unfollow" : "Follow"}
           </button>
           <ProfileReels user={user} profile={inspectedProfile} />
-          <SocialConnections profileId={inspectedProfile.id} />
         </section>
       </div>
     );
-  if (selected)
+  if (selected && !connectionView)
     return (
       <FriendChat
         friendship={selected}
         friend={profiles[otherId(selected)]}
         user={user}
         onBack={() => setSelected(null)}
+        onOpenConnections={(mode) => {
+          const selectedFriend = profiles[otherId(selected)];
+          if (selectedFriend)
+            setConnectionView({
+              profileId: selectedFriend.id,
+              username: selectedFriend.username,
+              mode,
+            });
+        }}
       />
+    );
+  if (connectionView)
+    return (
+      <div className="social-overlay">
+        <section className="friends-panel connections-panel">
+          <header>
+            <button className="visible-back" onClick={() => setConnectionView(null)}>
+              <ArrowLeft /> <span>Back</span>
+            </button>
+            <b>@{connectionView.username}</b>
+          </header>
+          <SocialConnections
+            key={`${connectionView.profileId}-${connectionView.mode}`}
+            profileId={connectionView.profileId}
+            initialMode={connectionView.mode}
+          />
+        </section>
+      </div>
     );
   if (settingsOpen)
     return (
@@ -2247,6 +2333,9 @@ function FriendsPanel({
               followingCount={socialCounts.following}
               postCount={socialCounts.posts}
               onAvatarClick={() => profileFileRef.current?.click()}
+              onPostsClick={() => document.querySelector(".profile-reels")?.scrollIntoView({ behavior: "smooth" })}
+              onFollowersClick={() => setConnectionView({ profileId: user.id, username: profile.username, mode: "followers" })}
+              onFollowingClick={() => setConnectionView({ profileId: user.id, username: profile.username, mode: "following" })}
             />
             <button
               className="edit-profile-main"
@@ -2255,7 +2344,6 @@ function FriendsPanel({
               Edit photo, name &amp; country
             </button>
             <ProfileReels user={user} profile={profile} />
-            <SocialConnections profileId={user.id} />
           </div>
         ) : activeTab === "find" ? (
           <div className="find-friends">
@@ -3025,11 +3113,13 @@ function FriendChat({
   friend,
   user,
   onBack,
+  onOpenConnections,
 }: {
   friendship: Friendship;
   friend?: ZionProfile;
   user: User;
   onBack: () => void;
+  onOpenConnections: (mode: "followers" | "following") => void;
 }) {
   const friendId = friend?.id ?? "";
   const [messages, setMessages] = useState<FriendMessage[]>([]);
@@ -3059,6 +3149,7 @@ function FriendChat({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recorderChunksRef = useRef<Blob[]>([]);
   const messageHoldRef = useRef<number | null>(null);
+  const viewOnceTimerRef = useRef<number | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -3527,11 +3618,27 @@ function FriendChat({
   };
   const openViewOnce = async (item: FriendMessage) => {
     if (!supabase || item.sender_id === user.id || item.viewed_at) return;
-    setOpenedOnceIds((current) => [...new Set([...current, item.id])]);
     const { error } = await supabase.rpc("consume_view_once_message", {
       p_message_id: item.id,
     });
-    if (error) alert(error.message);
+    if (error) return alert(error.message);
+    setOpenedOnceIds((current) => [...new Set([...current, item.id])]);
+    setMediaPreview(item);
+    if (viewOnceTimerRef.current) window.clearTimeout(viewOnceTimerRef.current);
+    viewOnceTimerRef.current = window.setTimeout(() => {
+      setMediaPreview(null);
+      setOpenedOnceIds((current) => current.filter((id) => id !== item.id));
+      void load();
+    }, 10_000);
+  };
+  const closeMediaPreview = () => {
+    if (viewOnceTimerRef.current) window.clearTimeout(viewOnceTimerRef.current);
+    const viewedId = mediaPreview?.view_once ? mediaPreview.id : null;
+    setMediaPreview(null);
+    if (viewedId) {
+      setOpenedOnceIds((current) => current.filter((id) => id !== viewedId));
+      void load();
+    }
   };
   const editMessage = async (item: FriendMessage) => {
     if (
@@ -3671,8 +3778,13 @@ function FriendChat({
             <b>Friend Profile</b>
           </header>
           <ProfileDetails profile={friend} label="Friend Profile" />
+          <ProfileDetails
+            profile={friend}
+            label="Friend Profile"
+            onFollowersClick={() => onOpenConnections("followers")}
+            onFollowingClick={() => onOpenConnections("following")}
+          />
           <ProfileReels user={user} profile={friend} />
-          <SocialConnections profileId={friend.id} />
           <div className="profile-status-row">
             <i className={friendOnline ? "online" : "offline"} />
             <b>
@@ -3900,7 +4012,7 @@ function FriendChat({
                 {!item.deleted_at &&
                 item.media_url &&
                 item.media_type === "image" &&
-                (!item.view_once || openedOnceIds.includes(item.id)) ? (
+                !item.view_once ? (
                   <img
                     src={item.media_url}
                     alt="Shared attachment"
@@ -4024,8 +4136,7 @@ function FriendChat({
             disabled={uploading}
             onClick={() => fileRef.current?.click()}
           >
-            <ImagePlus />
-            <span>{uploading ? `${friendUploadProgress}%` : "Gallery"}</span>
+            {uploading ? <span>{friendUploadProgress}%</span> : <Plus />}
           </button>
           <input
             value={text}
@@ -4038,25 +4149,21 @@ function FriendChat({
             }
             maxLength={1000}
           />
-          <button
-            className="send-button"
-            aria-label="Send message"
-            disabled={!text.trim()}
-            onClick={() => void send()}
-          >
-            <Send />
-          </button>
-          <button
-            className={`voice-note-button ${recording ? "recording" : ""}`}
-            type="button"
-            aria-label={
-              recording ? "Stop and send voice note" : "Record voice note"
-            }
-            disabled={uploading}
-            onClick={() => void toggleVoiceRecording()}
-          >
-            {recording ? <MicOff /> : <Mic />}
-          </button>
+          {text.trim() ? (
+            <button className="send-button" aria-label="Send message" onClick={() => void send()}>
+              <Send />
+            </button>
+          ) : (
+            <button
+              className={`voice-note-button ${recording ? "recording" : ""}`}
+              type="button"
+              aria-label={recording ? "Stop and send voice note" : "Record voice note"}
+              disabled={uploading}
+              onClick={() => void toggleVoiceRecording()}
+            >
+              {recording ? <MicOff /> : <Mic />}
+            </button>
+          )}
         </div>
         {mediaChoice ? (
           <div className="media-choice-overlay" onClick={() => setMediaChoice(null)}>
@@ -4103,9 +4210,9 @@ function FriendChat({
         {mediaPreview?.media_url ? (
           <div
             className="chat-media-lightbox"
-            onClick={() => setMediaPreview(null)}
+            onClick={closeMediaPreview}
           >
-            <button aria-label="Close preview">
+            <button aria-label="Close preview" onClick={closeMediaPreview}>
               <X />
             </button>
             {mediaPreview.media_type === "video" ? (

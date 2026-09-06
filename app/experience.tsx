@@ -67,6 +67,7 @@ export function Experience({
   onOpenFindFriends,
   onOpenGames,
   notificationCount = 0,
+  friendUnreadCount = 0,
   onOpenAccountManager,
 }: {
   profile?: ZionProfile;
@@ -78,6 +79,7 @@ export function Experience({
   onOpenFindFriends?: () => void;
   onOpenGames?: () => void;
   notificationCount?: number;
+  friendUnreadCount?: number;
   onOpenAccountManager?: () => void;
 }) {
   const [stage, setStage] = useState<Stage>("welcome");
@@ -576,9 +578,10 @@ export function Experience({
           <span>ZION</span>
         </button>
         <div className="topbar-actions">
-          <button className="friends-nav" type="button" onClick={onOpenFriends}>
+          <button className="friends-nav notification-nav" type="button" onClick={onOpenFriends}>
             <Users size={16} />
             <b>Friends</b>
+            {friendUnreadCount ? <em>{friendUnreadCount}</em> : null}
           </button>
           <button
             className="friends-nav"

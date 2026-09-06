@@ -594,6 +594,8 @@ export function ZionReels({
             )}
           </span>
           <h2>{profileOpen.username}</h2>
+          <small>@{profileOpen.username} · {profileOpen.is_private ? "Private" : "Public"} account</small>
+          <ReelProfileStats profile={profileOpen} />
           {profileOpen.id !== user.id ? (
             <>
               <button onClick={() => void toggleFollow(profileOpen)}>
@@ -605,6 +607,7 @@ export function ZionReels({
             </>
           ) : null}
           <small>{friendMessage}</small>
+          <ProfileReels user={user} profile={profileOpen} />
         </div>
       ) : null}
       {pendingUpload ? (
@@ -843,5 +846,48 @@ export function ProfileReels({
       </div> : null}
       {canView && !items.length ? <p>No posts or Reels uploaded yet.</p> : null}
     </section>
+  );
+}
+
+function ReelProfileStats({ profile }: { profile: ZionProfile }) {
+  const [counts, setCounts] = useState({ posts: 0, followers: 0, following: 0 });
+  const [mode, setMode] = useState<"followers" | "following" | null>(null);
+  const [people, setPeople] = useState<ZionProfile[]>([]);
+  useEffect(() => {
+    if (!supabase) return;
+    void (async () => {
+      const [posts, followers, following] = await Promise.all([
+        supabase!.from("zion_reels").select("id", { count: "exact", head: true }).eq("owner_id", profile.id),
+        supabase!.from("profile_follows").select("follower_id", { count: "exact", head: true }).eq("following_id", profile.id),
+        supabase!.from("profile_follows").select("following_id", { count: "exact", head: true }).eq("follower_id", profile.id),
+      ]);
+      setCounts({ posts: posts.count ?? 0, followers: followers.count ?? 0, following: following.count ?? 0 });
+    })();
+  }, [profile.id]);
+  const open = async (next: "followers" | "following") => {
+    if (!supabase) return;
+    setMode(next);
+    const { data } = next === "followers"
+      ? await supabase.from("profile_follows").select("follower_id").eq("following_id", profile.id)
+      : await supabase.from("profile_follows").select("following_id").eq("follower_id", profile.id);
+    const ids = (data ?? []).map((row) => next === "followers" ? (row as { follower_id: string }).follower_id : (row as { following_id: string }).following_id);
+    if (!ids.length) return setPeople([]);
+    const { data: rows } = await supabase.from("profiles").select("id,username,avatar,avatar_url,country,gender,is_banned,ban_reason").in("id", ids);
+    setPeople((rows as ZionProfile[] | null) ?? []);
+  };
+  if (mode) return (
+    <div className="reel-profile-people">
+      <button onClick={() => setMode(null)}>← Back to profile</button>
+      <h3>{mode}</h3>
+      {people.map((person) => <article key={person.id}><span>{person.avatar_url ? <img src={person.avatar_url} alt="" /> : person.avatar}</span><b>{person.username}</b></article>)}
+      {!people.length ? <p>No {mode} yet.</p> : null}
+    </div>
+  );
+  return (
+    <div className="reel-profile-counts">
+      <button><b>{counts.posts}</b><small>Posts</small></button>
+      <button onClick={() => void open("followers")}><b>{counts.followers + (profile.follower_base_count ?? 0)}</b><small>Followers</small></button>
+      <button onClick={() => void open("following")}><b>{counts.following}</b><small>Following</small></button>
+    </div>
   );
 }

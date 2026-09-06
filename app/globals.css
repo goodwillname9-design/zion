@@ -867,6 +867,30 @@ input {
     touch-action: manipulation;
   }
 }
+
+/* V53 — full Instagram-style profile opened from a Reel. */
+.reel-profile-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 170;
+  transform: none;
+  width: 100%;
+  height: 100dvh;
+  padding: max(62px, calc(env(safe-area-inset-top) + 12px)) 16px max(86px, calc(env(safe-area-inset-bottom) + 70px));
+  overflow-y: auto;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(160deg,#18142e,#090812 72%);
+}
+.reel-profile-modal > span { margin-top: 12px; }
+.reel-profile-modal > .profile-reels { width: min(680px,100%); margin-inline:auto; text-align:left; }
+.reel-profile-counts { width:min(520px,100%); margin:8px auto; display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.reel-profile-counts button { min-height:64px; display:grid; place-content:center; gap:3px; border:1px solid rgba(109,242,193,.2); border-radius:14px; color:#fff; background:rgba(255,255,255,.04); }
+.reel-profile-counts small { color:#918ba2; }
+.reel-profile-people { grid-column:1/-1; display:grid; gap:7px; padding:8px 0; }
+.reel-profile-people > button { min-height:44px; border:0; border-radius:12px; color:#171328; background:#d9ff83; font-weight:850; }
+.reel-profile-people article { min-height:54px; display:flex; align-items:center; gap:10px; padding:7px 10px; border:1px solid rgba(255,255,255,.1); border-radius:13px; text-align:left; }
+.reel-profile-people article span { width:40px; height:40px; display:grid; place-items:center; overflow:hidden; border-radius:50%; background:#d9ff83; }
 .ludo-controls p {
   margin: 10px 0 0;
   color: #a9a3b7;
@@ -2916,7 +2940,8 @@ footer span {
   gap: 10px;
   margin: 12px 0 4px;
 }
-.profile-social-counts span {
+.profile-social-counts span,
+.profile-social-counts button {
   min-width: 0;
   display: grid;
   gap: 2px;
@@ -2925,6 +2950,13 @@ footer span {
   border-radius: 15px;
   background: rgba(109, 242, 193, 0.055);
   text-align: center;
+}
+.profile-social-counts button {
+  color: inherit;
+  cursor: pointer;
+}
+.profile-social-counts button:disabled {
+  cursor: default;
 }
 .profile-social-counts b {
   color: #d9ff83;
@@ -5789,7 +5821,9 @@ html[data-theme="day"] .friend-chat small {
 }
 
 .friend-chat .friend-compose {
-  grid-template-columns: 104px minmax(0, 1fr) 52px 52px;
+  grid-template-columns: 52px minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 8px;
 }
 .friend-chat .view-once-toggle,
 .friend-chat .voice-note-button {
@@ -6110,7 +6144,7 @@ html[data-theme="day"] .friend-chat small {
   }
   .friend-chat .friend-compose,
   .social-overlay .friend-chat .friend-compose {
-    grid-template-columns: 52px minmax(0, 1fr) 48px 48px;
+    grid-template-columns: 48px minmax(0, 1fr) 48px;
     align-items: center;
   }
   .friend-compose .media-button span {
@@ -6122,6 +6156,42 @@ html[data-theme="day"] .friend-chat small {
     margin: 0;
     border-radius: 15px;
   }
+}
+
+/* V53 — WhatsApp-style composer across phone, tablet and desktop. */
+.friend-compose .media-button,
+.friend-compose .send-button,
+.friend-compose .voice-note-button {
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+.friend-compose .media-button span { font-size: 10px; }
+.friend-compose > input:not([type="file"]) {
+  width: 100%;
+  height: 52px;
+  min-width: 0;
+  margin: 0;
+  padding: 0 16px;
+  border-radius: 999px;
+}
+.friend-chat { max-width: 920px; }
+@media (min-width: 641px) and (max-width: 1100px) {
+  .friend-chat { width: min(92vw, 860px); }
+}
+@media (max-width: 640px) {
+  .friend-compose .media-button,
+  .friend-compose .send-button,
+  .friend-compose .voice-note-button {
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+  }
+  .friend-compose > input:not([type="file"]) { height: 48px; }
 }
 
 /* V51 — compact, thumb-friendly iPhone layout with reliable notch spacing. */
@@ -6178,7 +6248,8 @@ html {
     gap: 7px;
     margin-top: 10px;
   }
-  .profile-social-counts span {
+  .profile-social-counts span,
+  .profile-social-counts button {
     min-height: 62px;
     padding: 8px 5px;
     border-radius: 13px;
@@ -6238,7 +6309,8 @@ html {
     height: 74px;
     font-size: 45px !important;
   }
-  .profile-social-counts span {
+  .profile-social-counts span,
+  .profile-social-counts button {
     min-height: 56px;
   }
 }
