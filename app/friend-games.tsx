@@ -7,7 +7,6 @@ import type { User } from "@supabase/supabase-js";
 
 import { supabase } from "@/lib/supabase";
 import type { ZionProfile } from "./experience";
-import { ZionStory } from "./zion-story";
 
 export type GameFriend = {
   friendshipId: string;
@@ -74,7 +73,6 @@ export function FriendGames({
   const [syncStatus, setSyncStatus] = useState<"connecting" | "live">(
     "connecting",
   );
-  const [storyOpen, setStoryOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!supabase) return;
@@ -298,15 +296,6 @@ export function FriendGames({
     return !error;
   };
 
-  if (storyOpen) {
-    return (
-      <ZionStory
-        country={(user.user_metadata?.country as string | undefined) ?? "Kuwait"}
-        onBack={() => setStoryOpen(false)}
-      />
-    );
-  }
-
   if (selected) {
     const friend = friendFor(selected);
     return (
@@ -421,11 +410,6 @@ export function FriendGames({
           </button>
         </div>
       ))}
-      <button className="zion-story-card" type="button" onClick={() => setStoryOpen(true)}>
-        <span className="zion-story-card-art"><i>Z</i></span>
-        <span><b>ZION STORY</b><small>Chapter One · The Wild Horizon</small><em>Open world · Horse riding · Jobs · Wildlife</em></span>
-        <strong>PLAY</strong>
-      </button>
       <div className="new-game-card">
         <div className="game-picker">
           {(["ludo", "chess", "tic_tac_toe"] as GameType[]).map((type) => (
