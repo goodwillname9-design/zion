@@ -3178,7 +3178,8 @@ function FriendChat({
   }, [friendId]);
   const load = useCallback(async () => {
     if (!supabase || !friendId) return;
-    await supabase.rpc("mark_friend_messages_read", {
+    // Reading state must not block the first paint of the conversation.
+    void supabase.rpc("mark_friend_messages_read", {
       p_friendship_id: friendship.id,
     });
     const { data } = await supabase
@@ -3187,12 +3188,13 @@ function FriendChat({
         "id,friendship_id,sender_id,message,media_path,media_type,view_once,viewed_at,hidden_for,created_at,read_at,edited_at,deleted_at,reply_to_id",
       )
       .eq("friendship_id", friendship.id)
-      .order("created_at");
-    const rows = ((data as FriendMessage[] | null) ?? []).filter(
-      (item) => !item.hidden_for?.includes(user.id),
-    );
-    const withUrls = await Promise.all(
-      rows.map(async (item) => {
+      .order("created_at", { ascending: false })
+      .limit(120);
+    const rows = ((data as FriendMessage[] | null) ?? [])
+      .filter((item) => !item.hidden_for?.includes(user.id))
+      .reverse();
+    const readyMessages = await Promise.all(
+      rows.map(async (item): Promise<FriendMessage> => {
         const encrypted = isE2EEEnvelope(item.message);
         const decrypted = await decryptText(
           item.message,
@@ -3210,19 +3212,40 @@ function FriendChat({
             media_url: cachedUrl,
             encrypted,
           };
+        return { ...item, display_message: null, encrypted };
+      }),
+    );
+
+    // Text appears immediately. Attachments are resolved progressively in the
+    // background, so a large history can never hold the chat screen hostage.
+    setMessages(readyMessages);
+    void Promise.all(
+      readyMessages.map(async (item) => {
+        if (!item.media_path || item.media_url) return;
         const { data: signed } = await supabase!.storage
           .from("chat-media")
           .createSignedUrl(item.media_path, 3600);
-        if (!signed?.signedUrl)
-          return { ...item, display_message: null, encrypted };
-        if (!encrypted)
-          return {
-            ...item,
-            display_message: null,
-            media_url: signed.signedUrl,
-          };
+        if (!signed?.signedUrl) return;
+        let mediaUrl = signed.signedUrl;
+        let mediaError: string | null = null;
+        if (!item.encrypted) {
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === item.id
+                ? { ...message, media_url: mediaUrl }
+                : message,
+            ),
+          );
+          return;
+        }
         try {
-          const metadata = JSON.parse(decrypted ?? "{}") as { mime?: string };
+          const decryptedMetadata = await decryptText(
+            item.message,
+            user.id,
+            friendId,
+            `friend:${friendship.id}`,
+          );
+          const metadata = JSON.parse(decryptedMetadata ?? "{}") as { mime?: string };
           const response = await fetch(signed.signedUrl);
           const blob = await decryptFile(
             await response.arrayBuffer(),
@@ -3231,19 +3254,24 @@ function FriendChat({
             friendId,
             `friend:${friendship.id}`,
           );
-          const url = URL.createObjectURL(blob);
-          mediaUrlsRef.current.set(item.media_path, url);
-          return { ...item, display_message: null, media_url: url, encrypted };
+          mediaUrl = URL.createObjectURL(blob);
+          mediaUrlsRef.current.set(item.media_path, mediaUrl);
         } catch {
-          return {
-            ...item,
-            display_message: "🔒 Unable to decrypt this attachment",
-            encrypted,
-          };
+          mediaError = "🔒 Unable to decrypt this attachment";
         }
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === item.id
+              ? {
+                  ...message,
+                  display_message: mediaError,
+                  media_url: mediaError ? undefined : mediaUrl,
+                }
+              : message,
+          ),
+        );
       }),
     );
-    setMessages(withUrls);
   }, [friendId, friendship.id, user.id]);
   const stopCall = useCallback(
     (notify = true) => {

@@ -6314,3 +6314,70 @@ html {
     min-height: 56px;
   }
 }
+
+/* V54 — final composer geometry. Keep this last so legacy mobile rules cannot
+   restore the old Gallery / extra-column layout. */
+.friend-chat .friend-compose,
+.social-overlay .friend-chat .friend-compose {
+  display: grid !important;
+  grid-template-columns: 52px minmax(0, 1fr) 52px !important;
+  align-items: center !important;
+  gap: 9px !important;
+  width: 100% !important;
+}
+.friend-chat .friend-compose > .media-button,
+.friend-chat .friend-compose > .send-button,
+.friend-chat .friend-compose > .voice-note-button,
+.social-overlay .friend-chat .friend-compose > .media-button,
+.social-overlay .friend-chat .friend-compose > .send-button,
+.social-overlay .friend-chat .friend-compose > .voice-note-button {
+  width: 52px !important;
+  min-width: 52px !important;
+  height: 52px !important;
+  min-height: 52px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+  border-radius: 50% !important;
+}
+.friend-chat .friend-compose > input:not([type="file"]),
+.social-overlay .friend-chat .friend-compose > input:not([type="file"]) {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 52px !important;
+  min-height: 52px !important;
+  margin: 0 !important;
+  padding-inline: 17px !important;
+  border-radius: 999px !important;
+}
+.friend-chat .friend-compose .media-button span {
+  max-width: 38px;
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+}
+@media (max-width: 640px) {
+  .friend-chat .friend-compose,
+  .social-overlay .friend-chat .friend-compose {
+    grid-template-columns: 46px minmax(0, 1fr) 46px !important;
+    gap: 7px !important;
+  }
+  .friend-chat .friend-compose > .media-button,
+  .friend-chat .friend-compose > .send-button,
+  .friend-chat .friend-compose > .voice-note-button,
+  .social-overlay .friend-chat .friend-compose > .media-button,
+  .social-overlay .friend-chat .friend-compose > .send-button,
+  .social-overlay .friend-chat .friend-compose > .voice-note-button {
+    width: 46px !important;
+    min-width: 46px !important;
+    height: 46px !important;
+    min-height: 46px !important;
+  }
+  .friend-chat .friend-compose > input:not([type="file"]),
+  .social-overlay .friend-chat .friend-compose > input:not([type="file"]) {
+    height: 46px !important;
+    min-height: 46px !important;
+    padding-inline: 14px !important;
+  }
+}
