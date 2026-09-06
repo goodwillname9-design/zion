@@ -98,7 +98,9 @@ type FriendMessage = {
   sender_id: string;
   message: string | null;
   media_path: string | null;
-  media_type: "image" | "video" | null;
+  media_type: "image" | "video" | "audio" | null;
+  view_once: boolean;
+  viewed_at: string | null;
   created_at: string;
   read_at: string | null;
   edited_at: string | null;
@@ -1898,6 +1900,7 @@ function FriendsPanel({
         ) : activeTab === "games" ? (
           <FriendGames
             user={user}
+            onBack={() => setActiveTab("friends")}
             initialGameId={gameToOpen}
             onInitialGameOpened={() => setGameToOpen(null)}
             friends={accepted
@@ -2684,19 +2687,55 @@ function AdminPanel({ user }: { user: User }) {
   const [rows, setRows] = useState<ZionProfile[]>([]);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
-  const load = useCallback(async () => {
-    if (!supabase) return;
-    const { data } = await supabase
-      .from("profiles")
-      .select(
-        "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,is_admin",
-      )
-      .order("created_at", { ascending: false });
-    setRows((data as ZionProfile[] | null) ?? []);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const pageRef = useRef(0);
+  const loadMoreRef = useRef<HTMLButtonElement>(null);
+  const load = useCallback(
+    async (reset = false) => {
+      if (!supabase || loadingMore) return;
+      setLoadingMore(true);
+      const page = reset ? 0 : pageRef.current;
+      const pageSize = 50;
+      const { data } = await supabase
+        .from("profiles")
+        .select(
+          "id,username,gender,country,avatar,avatar_url,created_at,is_banned,ban_reason,is_admin",
+        )
+        .order("created_at", { ascending: false })
+        .range(page * pageSize, page * pageSize + pageSize - 1);
+      const next = (data as ZionProfile[] | null) ?? [];
+      setRows((current) =>
+        reset
+          ? next
+          : [
+              ...current,
+              ...next.filter(
+                (item) => !current.some((old) => old.id === item.id),
+              ),
+            ],
+      );
+      pageRef.current = page + 1;
+      setHasMore(next.length === pageSize);
+      setLoadingMore(false);
+    },
+    [loadingMore],
+  );
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(true), 0);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    void load();
-  }, [load]);
+    const target = loadMoreRef.current;
+    if (!target || !hasMore || query) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => entry.isIntersecting && void load(),
+      { rootMargin: "240px" },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, load, query]);
   const toggleBan = async (profile: ZionProfile) => {
     if (!supabase || profile.id === user.id) return;
     setBusy(true);
@@ -2716,7 +2755,14 @@ function AdminPanel({ user }: { user: User }) {
       .update({ is_banned: next, ban_reason: next ? reason : null })
       .eq("id", profile.id);
     if (error) alert(error.message);
-    else await load();
+    else
+      setRows((current) =>
+        current.map((item) =>
+          item.id === profile.id
+            ? { ...item, is_banned: next, ban_reason: next ? reason : null }
+            : item,
+        ),
+      );
     setBusy(false);
   };
   const filtered = rows.filter((item) =>
@@ -2768,6 +2814,16 @@ function AdminPanel({ user }: { user: User }) {
         {!filtered.length ? (
           <p className="admin-empty">No matching profiles.</p>
         ) : null}
+        {!query && hasMore ? (
+          <button
+            ref={loadMoreRef}
+            className="admin-load-more"
+            disabled={loadingMore}
+            onClick={() => void load()}
+          >
+            {loadingMore ? "Loading accounts…" : "Load older accounts"}
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -2789,6 +2845,9 @@ function FriendChat({
   const [text, setText] = useState("");
   const [uploading, setUploading] = useState(false);
   const [friendUploadProgress, setFriendUploadProgress] = useState(0);
+  const [recording, setRecording] = useState(false);
+  const [sendViewOnce, setSendViewOnce] = useState(false);
+  const [openedOnceIds, setOpenedOnceIds] = useState<number[]>([]);
   const [friendOnline, setFriendOnline] = useState(false);
   const [friendTyping, setFriendTyping] = useState(false);
   const [replyTo, setReplyTo] = useState<FriendMessage | null>(null);
@@ -2803,6 +2862,8 @@ function FriendChat({
   const [speakerOn, setSpeakerOn] = useState(true);
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recorderChunksRef = useRef<Blob[]>([]);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -2823,7 +2884,7 @@ function FriendChat({
     const { data } = await supabase
       .from("friend_messages")
       .select(
-        "id,friendship_id,sender_id,message,media_path,media_type,created_at,read_at,edited_at,deleted_at,reply_to_id",
+        "id,friendship_id,sender_id,message,media_path,media_type,view_once,viewed_at,created_at,read_at,edited_at,deleted_at,reply_to_id",
       )
       .eq("friendship_id", friendship.id)
       .order("created_at");
@@ -3167,7 +3228,7 @@ function FriendChat({
       );
     }
   };
-  const upload = async (file?: File) => {
+  const upload = async (file?: File, forceViewOnce = sendViewOnce) => {
     if (!supabase || !file || !friendId) return;
     if (file.size > 250 * 1024 * 1024) {
       alert("Maximum encrypted media size is 250 MB.");
@@ -3177,9 +3238,11 @@ function FriendChat({
       ? "image"
       : file.type.startsWith("video/")
         ? "video"
-        : null;
+        : file.type.startsWith("audio/")
+          ? "audio"
+          : null;
     if (!mediaType) {
-      alert("Choose an image or video.");
+      alert("Choose an image, video or audio file.");
       return;
     }
     setUploading(true);
@@ -3211,6 +3274,7 @@ function FriendChat({
           message: encryptedMetadata,
           media_path: path,
           media_type: mediaType,
+          view_once: mediaType === "image" && forceViewOnce,
           reply_to_id: replyTo?.id ?? null,
         });
       if (messageError) throw messageError;
@@ -3222,7 +3286,41 @@ function FriendChat({
     setUploading(false);
     setFriendUploadProgress(0);
     setReplyTo(null);
+    setSendViewOnce(false);
     await load();
+  };
+  const toggleVoiceRecording = async () => {
+    if (recording) return recorderRef.current?.stop();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      recorderChunksRef.current = [];
+      recorder.ondataavailable = (event) =>
+        event.data.size && recorderChunksRef.current.push(event.data);
+      recorder.onstop = () => {
+        const file = new File(
+          recorderChunksRef.current,
+          `voice-${Date.now()}.webm`,
+          { type: recorder.mimeType || "audio/webm" },
+        );
+        stream.getTracks().forEach((track) => track.stop());
+        setRecording(false);
+        void upload(file, false);
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch {
+      alert("Allow microphone access to record a voice note.");
+    }
+  };
+  const openViewOnce = async (item: FriendMessage) => {
+    if (!supabase || item.sender_id === user.id || item.viewed_at) return;
+    setOpenedOnceIds((current) => [...new Set([...current, item.id])]);
+    const { error } = await supabase.rpc("consume_view_once_message", {
+      p_message_id: item.id,
+    });
+    if (error) alert(error.message);
   };
   const editMessage = async (item: FriendMessage) => {
     if (
@@ -3536,13 +3634,35 @@ function FriendChat({
                   </div>
                 ) : null}
                 {!item.deleted_at &&
+                item.view_once &&
+                item.sender_id !== user.id &&
+                !openedOnceIds.includes(item.id) ? (
+                  <button
+                    className="view-once-button"
+                    disabled={Boolean(item.viewed_at)}
+                    onClick={() => void openViewOnce(item)}
+                  >
+                    {item.viewed_at
+                      ? "Photo already opened"
+                      : "View photo once"}
+                  </button>
+                ) : null}
+                {!item.deleted_at &&
                 item.media_url &&
-                item.media_type === "image" ? (
+                item.media_type === "image" &&
+                (!item.view_once ||
+                  item.sender_id === user.id ||
+                  openedOnceIds.includes(item.id)) ? (
                   <img
                     src={item.media_url}
                     alt="Shared attachment"
                     loading="lazy"
                   />
+                ) : null}
+                {!item.deleted_at &&
+                item.media_url &&
+                item.media_type === "audio" ? (
+                  <audio src={item.media_url} controls preload="metadata" />
                 ) : null}
                 {!item.deleted_at &&
                 item.media_url &&
@@ -3652,6 +3772,14 @@ function FriendChat({
             <ImagePlus />
             <span>{uploading ? `${friendUploadProgress}%` : "Gallery"}</span>
           </button>
+          <button
+            className={`view-once-toggle ${sendViewOnce ? "active" : ""}`}
+            type="button"
+            title="Send next photo as view once"
+            onClick={() => setSendViewOnce((value) => !value)}
+          >
+            ①
+          </button>
           <input
             value={text}
             onChange={(event) => changeText(event.target.value)}
@@ -3670,6 +3798,17 @@ function FriendChat({
             onClick={() => void send()}
           >
             <Send />
+          </button>
+          <button
+            className={`voice-note-button ${recording ? "recording" : ""}`}
+            type="button"
+            aria-label={
+              recording ? "Stop and send voice note" : "Record voice note"
+            }
+            disabled={uploading}
+            onClick={() => void toggleVoiceRecording()}
+          >
+            {recording ? <MicOff /> : <Mic />}
           </button>
         </div>
       </section>

@@ -49,11 +49,13 @@ export function FriendGames({
   friends,
   initialGameId,
   onInitialGameOpened,
+  onBack,
 }: {
   user: User;
   friends: GameFriend[];
   initialGameId?: string | null;
   onInitialGameOpened?: () => void;
+  onBack: () => void;
 }) {
   const [games, setGames] = useState<GameRow[]>([]);
   const [selected, setSelected] = useState<GameRow | null>(null);
@@ -316,6 +318,14 @@ export function FriendGames({
   return (
     <div className="games-hub">
       <div className="games-title">
+        <button
+          className="games-back"
+          type="button"
+          onClick={onBack}
+          aria-label="Back to friends"
+        >
+          <ArrowLeft />
+        </button>
         <Gamepad2 />
         <div>
           <h2>Play with Friends</h2>
@@ -932,7 +942,7 @@ function LudoBoard({
           disabled={game.current_turn !== userId || dice !== null || rolling}
         >
           <DiceFace
-            value={rolling ? rollingValue : (dice ?? 1)}
+            value={rolling ? rollingValue : (dice ?? rollingValue)}
             rolling={rolling}
           />
           <strong>

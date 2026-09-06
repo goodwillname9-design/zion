@@ -774,6 +774,10 @@ input {
     0 10px 18px rgba(0, 0, 0, 0.25);
 }
 .dice-cube i {
+  width: 100%;
+  aspect-ratio: 1;
+  align-self: center;
+  justify-self: center;
   border-radius: 50%;
 }
 .dice-cube i.pip {
@@ -782,6 +786,39 @@ input {
 }
 .dice-cube.rolling {
   animation: dice-roll 0.52s ease-in-out;
+}
+.games-title .games-back {
+  flex: 0 0 46px;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+.admin-load-more {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 12px;
+  border: 1px solid rgba(217, 255, 131, 0.3);
+  border-radius: 14px;
+  color: #d9ff83;
+  background: rgba(217, 255, 131, 0.07);
+  font-weight: 850;
+}
+@media (max-width: 640px) {
+  .dice-cube {
+    width: 52px;
+    padding: 8px;
+    gap: 4px;
+  }
+  .dice-button-pro {
+    min-height: 76px;
+    touch-action: manipulation;
+  }
 }
 .ludo-controls p {
   margin: 10px 0 0;
@@ -5560,5 +5597,58 @@ html[data-theme="day"] .friend-chat small {
   .social-overlay .friend-chat .friend-compose .media-button,
   .social-overlay .friend-chat .friend-compose .send-button {
     width: 48px;
+  }
+}
+
+.friend-chat .friend-compose {
+  grid-template-columns: 80px 44px minmax(0, 1fr) 52px 52px;
+}
+.friend-chat .view-once-toggle,
+.friend-chat .voice-note-button {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #cfc9da;
+  background: #211d35;
+  font-weight: 900;
+}
+.friend-chat .view-once-toggle.active {
+  color: #171328;
+  background: #d9ff83;
+}
+.friend-chat .voice-note-button.recording {
+  color: #fff;
+  background: #ec4167;
+  animation: recording-pulse 0.9s ease-in-out infinite alternate;
+}
+.friend-bubble audio {
+  width: min(290px, 75vw);
+  height: 42px;
+}
+.view-once-button {
+  min-width: 190px;
+  min-height: 48px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 15px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.09);
+  font-weight: 850;
+}
+@keyframes recording-pulse {
+  to {
+    box-shadow: 0 0 0 7px rgba(236, 65, 103, 0.18);
+  }
+}
+@media (max-width: 640px) {
+  .social-overlay .friend-chat .friend-compose {
+    grid-template-columns: 44px 38px minmax(0, 1fr) 44px 44px;
+    gap: 5px;
+  }
+  .social-overlay .friend-chat .friend-compose .media-button,
+  .social-overlay .friend-chat .friend-compose .send-button {
+    width: 44px;
+  }
+  .friend-chat .view-once-toggle,
+  .friend-chat .voice-note-button {
+    padding: 0;
   }
 }
