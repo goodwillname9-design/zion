@@ -400,11 +400,11 @@ export function FriendGames({
           <p>Realtime private games · invitation required</p>
         </div>
       </div>
-      <Link href="/forest" className="new-game-card" style={{ display: 'block', marginBottom: 20, padding: 24, textDecoration: 'none', color: 'inherit', background: 'linear-gradient(120deg, #1c302b, #171426)' }}>
-        <small>ZION STORY · SINGLE-PLAYER PROTOTYPE</small>
-        <h2 style={{ fontSize: 26, margin: '10px 0' }}>Whispering Pines →</h2>
-        <p>Explore the forest on horseback. Three landmarks, one open trail.</p>
-        <small>Procedural environment and placeholder horse/rider models.</small>
+      <Link href="/city" className="new-game-card" style={{ display: 'block', marginBottom: 20, padding: 24, textDecoration: 'none', color: 'inherit', background: 'linear-gradient(120deg, #1c302b, #171426)' }}>
+        <small>ZION STORY · HARBOUR CITY</small>
+        <h2 style={{ fontSize: 26, margin: '10px 0' }}>Your next shift starts here →</h2>
+        <p>Cars, motorcycles, deliveries and private friend exploration rooms.</p>
+        <small>Original procedural city · Online rooms require the V63 SQL update.</small>
       </Link>
       {pending.map((game) => (
         <div className="game-invite" key={game.id}>
