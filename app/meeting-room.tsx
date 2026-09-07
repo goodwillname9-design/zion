@@ -33,6 +33,11 @@ export function MeetingRoom() {
   const [serverUrl, setServerUrl] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showPasscode, setShowPasscode] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const connectionError = (message: string) => /invalid token/i.test(message)
+    ? "LiveKit rejected the connection token. The site owner must verify LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET belong to the same project, then redeploy. This is not your meeting password."
+    : message;
   const inviteUrl = useMemo(
     () =>
       meetingId
@@ -54,8 +59,10 @@ export function MeetingRoom() {
       return setError(
         "Enter the Meeting ID and a passcode of at least 6 characters.",
       );
+    if (busy) return;
     setBusy(true);
     setError("");
+    try {
     const { data } = await supabase.auth.getSession();
     if (!data.session) {
       setBusy(false);
@@ -68,6 +75,7 @@ export function MeetingRoom() {
         authorization: `Bearer ${data.session.access_token}`,
       },
       body: JSON.stringify({ meetingId: requestedMeeting, passcode: requestedPasscode }),
+      signal: AbortSignal.timeout(20000),
     });
     const result = await response.json().catch(() => ({ error: "Meeting server returned an invalid response." }));
     setBusy(false);
@@ -75,14 +83,30 @@ export function MeetingRoom() {
       return setError(result.error || "Could not join meeting.");
     setToken(result.token);
     setServerUrl(result.serverUrl);
+    } catch {
+      setError("Meeting connection timed out or the network failed. Please retry.");
+    } finally {
+      setBusy(false);
+    }
   };
   const createMeeting = async () => {
+    if (passcode.trim().length < 6)
+      return setError("Choose your own meeting password: at least 6 characters.");
     const newMeetingId = makeCode();
-    const newPasscode = makeCode();
+    const newPasscode = passcode.trim();
+    setCopied(false);
     setMeetingId(newMeetingId);
     setPasscode(newPasscode);
     setError("");
     await connect(newMeetingId, newPasscode);
+  };
+  const copyInvite = async () => {
+    try {
+      await navigator.clipboard.writeText(`Join my ZION meeting\n${inviteUrl}\nMeeting ID: ${meetingId}\nPassword: ${passcode}\nShare only with intended participants.`);
+      setCopied(true);
+    } catch {
+      setError("Copy unavailable. Copy the Meeting ID and your password manually.");
+    }
   };
 
   if (token && serverUrl)
@@ -91,7 +115,7 @@ export function MeetingRoom() {
         <Link href="/" className="meeting-back active-room-back"><ArrowLeft /> Back</Link>
         <div className="meeting-secure-label">
           <ShieldCheck /> Encrypted transport · ZION meeting · {meetingId}
-          <button onClick={() => void navigator.clipboard.writeText(`ZION Meeting ID: ${meetingId}\nPasscode: ${passcode}`)}><Copy /> Copy invite</button>
+          <button onClick={() => void copyInvite()}><Copy /> {copied ? "Copied" : "Copy invite + password"}</button>
         </div>
         <LiveKitRoom
           token={token}
@@ -100,7 +124,7 @@ export function MeetingRoom() {
           audio
           video
           onDisconnected={() => setToken("")}
-          onError={(problem) => { setError(problem.message || "Meeting connection failed."); setToken(""); }}
+          onError={(problem) => { setError(connectionError(problem.message || "Meeting connection failed.")); setToken(""); }}
         >
           <VideoConference />
           <RoomAudioRenderer />
@@ -132,7 +156,7 @@ export function MeetingRoom() {
           Meeting ID
           <input
             value={meetingId}
-            onChange={(event) => setMeetingId(event.target.value.toUpperCase())}
+            onChange={(event) => { setMeetingId(event.target.value.toUpperCase()); setCopied(false); }}
             placeholder="Example: A8K2QZ"
             maxLength={40}
           />
@@ -143,12 +167,13 @@ export function MeetingRoom() {
           </span>
           <input
             value={passcode}
-            onChange={(event) => setPasscode(event.target.value)}
-            type="password"
-            placeholder="Minimum 6 characters"
+            onChange={(event) => { setPasscode(event.target.value); setCopied(false); }}
+            type={showPasscode ? "text" : "password"}
+            placeholder="Choose your password · minimum 6 characters"
             maxLength={64}
           />
         </label>
+        <button type="button" className="meeting-back" aria-pressed={showPasscode} onClick={() => setShowPasscode(!showPasscode)}>{showPasscode ? "Hide password" : "Show password"}</button>
         {error ? <p className="meeting-error">{error}</p> : null}
         <div className="meeting-actions">
           <button onClick={() => void createMeeting()} disabled={busy}>
@@ -167,14 +192,14 @@ export function MeetingRoom() {
             <div>
               <Users />
               <span>
-                <b>Invite link ready</b>
-                <small>Share the passcode separately.</small>
+                <b>Meeting invitation</b>
+                <small>Copies the link and password. Send only to people you trust. Connection is not confirmed until you join.</small>
               </span>
             </div>
             <button
-              onClick={() => void navigator.clipboard.writeText(inviteUrl)}
+              onClick={() => void copyInvite()}
             >
-              <Copy /> Copy link
+              <Copy /> {copied ? "Copied" : "Copy invite + password"}
             </button>
           </div>
         ) : null}
