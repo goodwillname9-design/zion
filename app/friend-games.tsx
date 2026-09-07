@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Chess } from "chess.js";
+import Link from "next/link";
 import { ArrowLeft, Crown, Gamepad2, RotateCcw, Swords } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 
@@ -399,6 +400,12 @@ export function FriendGames({
           <p>Realtime private games · invitation required</p>
         </div>
       </div>
+      <Link href="/forest" className="new-game-card" style={{ display: 'block', marginBottom: 20, padding: 24, textDecoration: 'none', color: 'inherit', background: 'linear-gradient(120deg, #1c302b, #171426)' }}>
+        <small>ZION STORY · SINGLE-PLAYER PROTOTYPE</small>
+        <h2 style={{ fontSize: 26, margin: '10px 0' }}>Whispering Pines →</h2>
+        <p>Explore the forest on horseback. Three landmarks, one open trail.</p>
+        <small>Procedural environment and placeholder horse/rider models.</small>
+      </Link>
       {pending.map((game) => (
         <div className="game-invite" key={game.id}>
           <Swords />

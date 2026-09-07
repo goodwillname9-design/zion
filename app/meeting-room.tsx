@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
+  ArrowLeft,
   Copy,
   LockKeyhole,
   LogIn,
@@ -86,6 +88,7 @@ export function MeetingRoom() {
   if (token && serverUrl)
     return (
       <main className="zion-meeting-active" data-lk-theme="default">
+        <Link href="/" className="meeting-back active-room-back"><ArrowLeft /> Back</Link>
         <div className="meeting-secure-label">
           <ShieldCheck /> Encrypted transport · ZION meeting · {meetingId}
           <button onClick={() => void navigator.clipboard.writeText(`ZION Meeting ID: ${meetingId}\nPasscode: ${passcode}`)}><Copy /> Copy invite</button>
@@ -108,6 +111,7 @@ export function MeetingRoom() {
   return (
     <main className="meeting-shell">
       <section className="meeting-card">
+        <Link href="/" className="meeting-back"><ArrowLeft /> Back</Link>
         <a href="/" className="meeting-brand">
           ♥ <b>ZION</b>
         </a>

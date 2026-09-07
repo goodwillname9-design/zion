@@ -17,6 +17,8 @@ import {
   Pencil,
   Phone,
   PhoneOff,
+  Play,
+  Pause,
   Pin,
   Plus,
   Reply,
@@ -3130,6 +3132,47 @@ function AdminPanel({ user }: { user: User }) {
   );
 }
 
+function VoiceNotePlayer({ src, onPlaybackError }: { src: string; onPlaybackError: () => void }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [current, setCurrent] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [speed, setSpeed] = useState(1);
+  const format = (seconds: number) => {
+    if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+    return `${Math.floor(seconds / 60)}:${Math.floor(seconds % 60).toString().padStart(2, "0")}`;
+  };
+  const toggle = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    try {
+      if (audio.paused) await audio.play();
+      else audio.pause();
+    } catch { onPlaybackError(); }
+  };
+  const changeSpeed = () => {
+    const next = speed === 1 ? 1.5 : speed === 1.5 ? 2 : 1;
+    setSpeed(next);
+    if (audioRef.current) audioRef.current.playbackRate = next;
+  };
+  return <div className="zion-voice-note">
+    <audio ref={audioRef} src={src} preload="auto" playsInline
+      onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
+      onEnded={() => { setPlaying(false); setCurrent(0); }}
+      onTimeUpdate={(event) => setCurrent(event.currentTarget.currentTime)}
+      onLoadedMetadata={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+      onDurationChange={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+      onError={onPlaybackError} />
+    <button className="voice-play" onClick={() => void toggle()} aria-label={playing ? "Pause voice note" : "Play voice note"}>{playing ? <Pause /> : <Play />}</button>
+    <div className="voice-track">
+      <div className="voice-wave" aria-hidden>{Array.from({ length: 24 }, (_, index) => <i key={index} style={{ height: `${8 + ((index * 7) % 17)}px` }} />)}</div>
+      <input aria-label="Voice note position" type="range" min="0" max={duration || 1} step="0.05" value={Math.min(current, duration || 1)} onChange={(event) => { if (audioRef.current) audioRef.current.currentTime = Number(event.target.value); }} />
+      <small>{format(current)} / {format(duration)}</small>
+    </div>
+    <button className="voice-speed" onClick={changeSpeed}>{speed}×</button>
+  </div>;
+}
+
 function FriendChat({
   friendship,
   friend,
@@ -4158,7 +4201,7 @@ function FriendChat({
                 {!item.deleted_at &&
                 item.media_url &&
                 item.media_type === "audio" ? (
-                  <audio src={item.media_url} controls preload="metadata" playsInline onError={() => setSecurityNotice("This older voice format is not supported by this browser.")} />
+                  <VoiceNotePlayer src={item.media_url} onPlaybackError={() => setSecurityNotice("This voice note cannot play on this browser. New recordings use a compatible format.")} />
                 ) : null}
                 {!item.deleted_at &&
                 item.media_url &&
