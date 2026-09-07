@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 
 export default function GlobalError({
   error,
@@ -11,6 +12,16 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error("ZION recovered from an interface error", error);
+    void (async () => {
+      if (!supabase) return;
+      const { data } = await supabase.auth.getUser();
+      if (!data.user) return;
+      await supabase.from("zion_error_logs").insert({
+        user_id: data.user.id,
+        error_code: error.digest ? `REACT_${error.digest.slice(0, 60)}` : "CLIENT_BOUNDARY",
+        route: window.location.pathname.slice(0, 200),
+      });
+    })();
   }, [error]);
 
   return (

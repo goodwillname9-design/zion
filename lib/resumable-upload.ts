@@ -10,12 +10,14 @@ export async function uploadResumable({
   body,
   contentType,
   onProgress,
+  signal,
 }: {
   bucket: string;
   path: string;
   body: Blob;
   contentType: string;
   onProgress?: (percentage: number) => void;
+  signal?: AbortSignal;
 }) {
   if (!supabase) throw new Error("Storage is not configured.");
   const client = supabase;
@@ -31,6 +33,7 @@ export async function uploadResumable({
     throw new Error("ZION storage configuration is missing.");
 
   const standardUpload = async () => {
+    if (signal?.aborted) throw new DOMException("Upload cancelled", "AbortError");
     const { error } = await client.storage.from(bucket).upload(path, body, {
       contentType,
       cacheControl: "3600",
@@ -81,7 +84,13 @@ export async function uploadResumable({
         onProgress?.(total ? Math.round((uploaded / total) * 100) : 0),
       onSuccess: () => resolve(),
     });
+    const cancel = () => {
+      void upload.abort(true);
+      reject(new DOMException("Upload cancelled", "AbortError"));
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
     void upload.findPreviousUploads().then((previous) => {
+      if (signal?.aborted) return cancel();
       if (previous[0]) upload.resumeFromPreviousUpload(previous[0]);
       upload.start();
     });

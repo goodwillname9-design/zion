@@ -87,7 +87,8 @@ type ActivityNotice = {
     | "reel_comment"
     | "profile_follow"
     | "profile_follow_request"
-    | "story_like";
+    | "story_like"
+    | "screenshot_attempt";
   reel_id: string | null;
   follow_request_id: string | null;
   created_at: string;
@@ -113,6 +114,7 @@ type FriendMessage = {
   encrypted?: boolean;
 };
 const avatars = ["👨🏽", "👨🏻‍🦱", "👨🏿‍🦲", "🧔🏼", "👩🏽", "👩🏻‍🦱", "👩🏿", "👱🏼‍♀️", "🧑🏾", "🧑🏻‍🦰"];
+const ZION_CEO_ID = "fd62030e-f3b8-4c14-bce7-a1f3eedbb74b";
 const streakBadge = (count: number) =>
   count >= 360 ? "🖤💛❤️" : count >= 30 ? "❤️" : count >= 10 ? "💛" : "🖤";
 const lastSeenLabel = (profile?: ZionProfile, online = false) => {
@@ -365,6 +367,7 @@ export function SocialShell() {
   const [notificationToast, setNotificationToast] = useState("");
   const [notificationCount, setNotificationCount] = useState(0);
   const [friendUnreadCount, setFriendUnreadCount] = useState(0);
+  const seenRealtimeEventsRef = useRef(new Set<string>());
   const notificationSeenAtRef = useRef(
     typeof window === "undefined"
       ? "1970-01-01T00:00:00.000Z"
@@ -523,7 +526,10 @@ export function SocialShell() {
         async (payload) => {
           void refreshNotificationCount();
           if (payload.eventType !== "INSERT") return;
-          const row = payload.new as { sender_id?: string };
+          const row = payload.new as { id?: number; sender_id?: string };
+          const eventKey = `message:${row.id ?? "unknown"}`;
+          if (seenRealtimeEventsRef.current.has(eventKey)) return;
+          seenRealtimeEventsRef.current.add(eventKey);
           if (!row.sender_id || row.sender_id === user.id) return;
           const { data: sender } = await client
             .from("profiles")
@@ -545,7 +551,10 @@ export function SocialShell() {
         },
         async (payload) => {
           void refreshNotificationCount();
-          const row = payload.new as { requester_id?: string; status?: string };
+          const row = payload.new as { id?: string; requester_id?: string; status?: string };
+          const eventKey = `friend:${payload.eventType}:${row.id ?? row.requester_id ?? "unknown"}:${row.status ?? "unknown"}`;
+          if (seenRealtimeEventsRef.current.has(eventKey)) return;
+          seenRealtimeEventsRef.current.add(eventKey);
           if (row.status !== "pending" || !row.requester_id) return;
           const { data: sender } = await client
             .from("profiles")
@@ -592,6 +601,9 @@ export function SocialShell() {
             !gameRow.participant_ids?.includes(user.id)
           )
             return;
+          const eventKey = `game:${row.id ?? row.inviter_id}`;
+          if (seenRealtimeEventsRef.current.has(eventKey)) return;
+          seenRealtimeEventsRef.current.add(eventKey);
           const { data: sender } = await client
             .from("profiles")
             .select("username,avatar")
@@ -631,7 +643,10 @@ export function SocialShell() {
         async (payload) => {
           void refreshNotificationCount();
           if (payload.eventType !== "INSERT") return;
-          const row = payload.new as { actor_id?: string; kind?: string };
+          const row = payload.new as { id?: number; actor_id?: string; kind?: string };
+          const eventKey = `activity:${row.id ?? `${row.actor_id}:${row.kind}`}`;
+          if (seenRealtimeEventsRef.current.has(eventKey)) return;
+          seenRealtimeEventsRef.current.add(eventKey);
           if (!row.actor_id) return;
           const { data: actor } = await client
             .from("profiles")
@@ -709,6 +724,7 @@ export function SocialShell() {
           notificationSeenAtRef.current = seenAt;
           localStorage.setItem("zion-notifications-seen-at", seenAt);
           setNotificationCount(0);
+          void supabase?.rpc("mark_all_zion_notifications_read");
           setFriendsInitialTab("notifications");
           setFriendsOpen(true);
         }}
@@ -2074,6 +2090,7 @@ function FriendsPanel({
             Block and report harassment, threats, scams or unwanted explicit
             content.
           </div>
+          <a className="privacy-policy-link" href="/privacy">Read Privacy &amp; Safety policy</a>
           <Button className="primary-action" onClick={() => void savePrivacy()}>
             Save settings
           </Button>
@@ -2225,7 +2242,9 @@ function FriendsPanel({
             {activityNotices.map((notice) => {
               const actor = profiles[notice.actor_id];
               const action =
-                notice.kind === "reel_comment"
+                notice.kind === "screenshot_attempt"
+                  ? "reported a screenshot attempt in your chat"
+                  : notice.kind === "reel_comment"
                   ? "commented on your reel"
                   : notice.kind === "story_like"
                     ? "liked your story"
@@ -2267,7 +2286,9 @@ function FriendsPanel({
                     </>
                   ) : (
                     <span>
-                      {notice.kind === "reel_comment"
+                      {notice.kind === "screenshot_attempt"
+                        ? "🛡️"
+                        : notice.kind === "reel_comment"
                         ? "💬"
                         : notice.kind === "profile_follow"
                           ? "➕"
@@ -3029,10 +3050,11 @@ function AdminPanel({ user }: { user: User }) {
       setBusy(false);
       return;
     }
-    const { error } = await supabase
-      .from("profiles")
-      .update({ is_banned: next, ban_reason: next ? reason : null })
-      .eq("id", profile.id);
+    const { error } = await supabase.rpc("moderate_zion_profile", {
+      p_target_id: profile.id,
+      p_banned: next,
+      p_reason: next ? reason : null,
+    });
     if (error) alert(error.message);
     else
       setRows((current) =>
@@ -3144,6 +3166,8 @@ function FriendChat({
   const [muted, setMuted] = useState(false);
   const [cameraOn, setCameraOn] = useState(true);
   const [speakerOn, setSpeakerOn] = useState(true);
+  const [chatShielded, setChatShielded] = useState(false);
+  const [securityNotice, setSecurityNotice] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -3181,7 +3205,11 @@ function FriendChat({
     // Reading state must not block the first paint of the conversation.
     void supabase.rpc("mark_friend_messages_read", {
       p_friendship_id: friendship.id,
-    });
+    }).then(() => liveRef.current?.send({
+      type: "broadcast",
+      event: "messages-read",
+      payload: { userId: user.id, at: new Date().toISOString() },
+    }));
     const { data } = await supabase
       .from("friend_messages")
       .select(
@@ -3189,7 +3217,7 @@ function FriendChat({
       )
       .eq("friendship_id", friendship.id)
       .order("created_at", { ascending: false })
-      .limit(120);
+      .limit(60);
     const rows = ((data as FriendMessage[] | null) ?? [])
       .filter((item) => !item.hidden_for?.includes(user.id))
       .reverse();
@@ -3221,7 +3249,8 @@ function FriendChat({
     setMessages(readyMessages);
     void Promise.all(
       readyMessages.map(async (item) => {
-        if (!item.media_path || item.media_url) return;
+        // View-once media is never prefetched with normal chat history.
+        if (!item.media_path || item.media_url || item.view_once) return;
         const { data: signed } = await supabase!.storage
           .from("chat-media")
           .createSignedUrl(item.media_path, 3600);
@@ -3422,6 +3451,20 @@ function FriendChat({
             2200,
           );
       })
+      .on("broadcast", { event: "screen-capture-attempt" }, ({ payload }) => {
+        if (payload.userId === user.id) return;
+        setSecurityNotice(`${friend?.username ?? "Your friend"}'s device reported a screenshot attempt.`);
+        window.setTimeout(() => setSecurityNotice(""), 6000);
+      })
+      .on("broadcast", { event: "messages-read" }, ({ payload }) => {
+        if (payload.userId === user.id) return;
+        const readAt = payload.at || new Date().toISOString();
+        setMessages((current) => current.map((message) =>
+          message.sender_id === user.id && !message.read_at
+            ? { ...message, read_at: readAt }
+            : message,
+        ));
+      })
       .on("broadcast", { event: "call-request" }, ({ payload }) => {
         if (payload.userId !== user.id) {
           const kind = payload.kind === "video" ? "video" : "audio";
@@ -3513,6 +3556,30 @@ function FriendChat({
       mediaUrls.clear();
     };
   }, [ensurePeer, friendId, friendship.id, load, stopCall, user.id]);
+  useEffect(() => {
+    if (user.id === ZION_CEO_ID) return;
+    const visibility = () => setChatShielded(document.hidden);
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key !== "PrintScreen") return;
+      setChatShielded(true);
+      setSecurityNotice("Screenshot attempt detected. Your friend was notified.");
+      void liveRef.current?.send({
+        type: "broadcast",
+        event: "screen-capture-attempt",
+        payload: { userId: user.id, at: new Date().toISOString() },
+      });
+      if (supabase) void supabase.rpc("notify_chat_screenshot_attempt", {
+        p_friendship_id: friendship.id,
+      });
+      window.setTimeout(() => setChatShielded(false), 1400);
+    };
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("keydown", keydown);
+    return () => {
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("keydown", keydown);
+    };
+  }, [friendship.id, user.id]);
   const announceTyping = (typing: boolean) => {
     void liveRef.current?.send({
       type: "broadcast",
@@ -3623,15 +3690,17 @@ function FriendChat({
     if (recording) return recorderRef.current?.stop();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const candidates = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"];
+      const mimeType = candidates.find((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       recorderChunksRef.current = [];
       recorder.ondataavailable = (event) =>
         event.data.size && recorderChunksRef.current.push(event.data);
       recorder.onstop = () => {
         const file = new File(
           recorderChunksRef.current,
-          `voice-${Date.now()}.webm`,
-          { type: recorder.mimeType || "audio/webm" },
+          `voice-${Date.now()}.${recorder.mimeType.includes("mp4") ? "m4a" : "webm"}`,
+          { type: recorder.mimeType || mimeType || "audio/webm" },
         );
         stream.getTracks().forEach((track) => track.stop());
         setRecording(false);
@@ -3646,10 +3715,43 @@ function FriendChat({
   };
   const openViewOnce = async (item: FriendMessage) => {
     if (!supabase || item.sender_id === user.id || item.viewed_at) return;
-    const { error } = await supabase.rpc("consume_view_once_message", {
+    if (!item.media_path) return alert("This photo is no longer available.");
+    const { data: signed } = await supabase.storage
+      .from("chat-media")
+      .createSignedUrl(item.media_path, 30);
+    if (!signed?.signedUrl)
+      return alert("This photo is no longer available.");
+    const { data: consumed, error } = await supabase.rpc("consume_view_once_message", {
       p_message_id: item.id,
     });
-    if (error) return alert(error.message);
+    if (error || !consumed)
+      return alert(error?.message ?? "This photo was already opened.");
+    try {
+      const decryptedMetadata = await decryptText(
+        item.message,
+        user.id,
+        friendId,
+        `friend:${friendship.id}`,
+      );
+      const metadata = JSON.parse(decryptedMetadata ?? "{}") as { mime?: string };
+      const response = await fetch(signed.signedUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error("Photo download failed");
+      const blob = item.encrypted
+        ? await decryptFile(
+            await response.arrayBuffer(),
+            metadata.mime ?? "image/jpeg",
+            user.id,
+            friendId,
+            `friend:${friendship.id}`,
+          )
+        : await response.blob();
+      const mediaUrl = URL.createObjectURL(blob);
+      mediaUrlsRef.current.set(item.media_path, mediaUrl);
+      item = { ...item, media_url: mediaUrl, viewed_at: new Date().toISOString() };
+    } catch {
+      void load();
+      return alert("This view-once photo could not be opened.");
+    }
     setOpenedOnceIds((current) => [...new Set([...current, item.id])]);
     setMediaPreview(item);
     if (viewOnceTimerRef.current) window.clearTimeout(viewOnceTimerRef.current);
@@ -3964,6 +4066,9 @@ function FriendChat({
           </div>
         ) : null}
         {callError ? <p className="call-error">{callError}</p> : null}
+        {callState !== "idle" ? (
+          <p className="call-security-note">Calls use encrypted WebRTC transport. Independent end-to-end encryption verification is pending.</p>
+        ) : null}
         <div className="streak-strip">
           <span>{streakBadge(friendship.streak_count)}</span>
           <b>{friendship.streak_count} day streak</b>
@@ -3973,6 +4078,8 @@ function FriendChat({
           <ShieldAlert size={15} /> End-to-end encrypted · Only you and this
           friend can read messages or open media.
         </div>
+        {securityNotice ? <div className="chat-security-notice">{securityNotice}</div> : null}
+        {chatShielded ? <div className="chat-privacy-shield">Private chat hidden</div> : null}
         <div className="friend-message-list" ref={listRef}>
           {!messages.length ? (
             <div className="empty-private-chat">
@@ -4051,7 +4158,7 @@ function FriendChat({
                 {!item.deleted_at &&
                 item.media_url &&
                 item.media_type === "audio" ? (
-                  <audio src={item.media_url} controls preload="metadata" />
+                  <audio src={item.media_url} controls preload="metadata" playsInline onError={() => setSecurityNotice("This older voice format is not supported by this browser.")} />
                 ) : null}
                 {!item.deleted_at &&
                 item.media_url &&

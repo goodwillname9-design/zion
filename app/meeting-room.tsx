@@ -44,14 +44,11 @@ export function MeetingRoom() {
     if (id) setMeetingId(id.toUpperCase());
   }, []);
 
-  const createMeeting = () => {
-    setMeetingId(makeCode());
-    setPasscode(makeCode());
-    setError("");
-  };
-  const connect = async () => {
+  const connect = async (meetingOverride?: string, passcodeOverride?: string) => {
+    const requestedMeeting = (meetingOverride ?? meetingId).trim().toUpperCase();
+    const requestedPasscode = passcodeOverride ?? passcode;
     if (!supabase) return setError("Supabase is not configured.");
-    if (meetingId.trim().length < 6 || passcode.length < 6)
+    if (requestedMeeting.length < 6 || requestedPasscode.length < 6)
       return setError(
         "Enter the Meeting ID and a passcode of at least 6 characters.",
       );
@@ -68,21 +65,30 @@ export function MeetingRoom() {
         "content-type": "application/json",
         authorization: `Bearer ${data.session.access_token}`,
       },
-      body: JSON.stringify({ meetingId, passcode }),
+      body: JSON.stringify({ meetingId: requestedMeeting, passcode: requestedPasscode }),
     });
-    const result = await response.json();
+    const result = await response.json().catch(() => ({ error: "Meeting server returned an invalid response." }));
     setBusy(false);
     if (!response.ok)
       return setError(result.error || "Could not join meeting.");
     setToken(result.token);
     setServerUrl(result.serverUrl);
   };
+  const createMeeting = async () => {
+    const newMeetingId = makeCode();
+    const newPasscode = makeCode();
+    setMeetingId(newMeetingId);
+    setPasscode(newPasscode);
+    setError("");
+    await connect(newMeetingId, newPasscode);
+  };
 
   if (token && serverUrl)
     return (
       <main className="zion-meeting-active" data-lk-theme="default">
         <div className="meeting-secure-label">
-          <ShieldCheck /> Secure ZION meeting · {meetingId}
+          <ShieldCheck /> Encrypted transport · ZION meeting · {meetingId}
+          <button onClick={() => void navigator.clipboard.writeText(`ZION Meeting ID: ${meetingId}\nPasscode: ${passcode}`)}><Copy /> Copy invite</button>
         </div>
         <LiveKitRoom
           token={token}
@@ -91,6 +97,7 @@ export function MeetingRoom() {
           audio
           video
           onDisconnected={() => setToken("")}
+          onError={(problem) => { setError(problem.message || "Meeting connection failed."); setToken(""); }}
         >
           <VideoConference />
           <RoomAudioRenderer />
@@ -140,8 +147,8 @@ export function MeetingRoom() {
         </label>
         {error ? <p className="meeting-error">{error}</p> : null}
         <div className="meeting-actions">
-          <button onClick={createMeeting}>
-            <Plus /> Create meeting
+          <button onClick={() => void createMeeting()} disabled={busy}>
+            <Plus /> {busy ? "Creating…" : "Create & join"}
           </button>
           <button
             className="primary"

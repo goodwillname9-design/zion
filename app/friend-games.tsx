@@ -7,6 +7,7 @@ import type { User } from "@supabase/supabase-js";
 
 import { supabase } from "@/lib/supabase";
 import type { ZionProfile } from "./experience";
+import { GameVoice } from "./game-voice";
 
 export type GameFriend = {
   friendshipId: string;
@@ -325,6 +326,7 @@ export function FriendGames({
                   : "Friend’s turn"}
           </span>
         </header>
+        {selected.status === "active" ? <GameVoice gameId={selected.id} /> : null}
         {selected.status === "pending" ? (
           <div className="game-result">
             <Swords /> Waiting for all invited players to accept…

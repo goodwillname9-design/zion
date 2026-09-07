@@ -9,11 +9,11 @@ const clean = (value: unknown, max: number) =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
 
 export async function POST(request: NextRequest) {
-  const livekitUrl = process.env.LIVEKIT_URL;
+  const livekitUrl = process.env.LIVEKIT_URL || process.env.NEXT_PUBLIC_LIVEKIT_URL;
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!livekitUrl || !apiKey || !apiSecret || !supabaseUrl || !supabaseKey)
     return NextResponse.json(
       { error: "Meeting service is not configured." },
@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
   if (!bearer)
     return NextResponse.json({ error: "Login required." }, { status: 401 });
   const authClient = createClient(supabaseUrl, supabaseKey, {
+    global: { headers: { Authorization: `Bearer ${bearer}` } },
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const { data, error } = await authClient.auth.getUser(bearer);

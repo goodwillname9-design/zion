@@ -59,6 +59,8 @@ export function ZionReels({
   const [reels, setReels] = useState<Reel[]>([]),
     [uploading, setUploading] = useState(false),
     [progress, setProgress] = useState(0);
+  const [reelLimit, setReelLimit] = useState(20);
+  const [hasMoreReels, setHasMoreReels] = useState(true);
   const [caption, setCaption] = useState(""),
     [commentsFor, setCommentsFor] = useState<Reel | null>(null),
     [comments, setComments] = useState<Comment[]>([]),
@@ -74,6 +76,7 @@ export function ZionReels({
     preview: string;
   } | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
     if (!supabase) return;
     void supabase.rpc("cleanup_expired_zion_stories");
@@ -81,10 +84,11 @@ export function ZionReels({
       .from("zion_reels")
       .select("id,owner_id,video_path,caption,created_at")
       .order("created_at", { ascending: false })
-      .limit(60);
+      .limit(reelLimit);
     const rows = (data ?? []) as Array<
       Omit<Reel, "profile" | "liked" | "likes" | "comments" | "url">
     >;
+    setHasMoreReels((data?.length ?? 0) === reelLimit);
     if (!rows.some((row) => row.id === OFFICIAL_REEL_ID))
       rows.unshift({
         id: OFFICIAL_REEL_ID,
@@ -126,7 +130,8 @@ export function ZionReels({
         .from("zion_stories")
         .select("id,owner_id,media_path,media_type,caption")
         .gt("expires_at", new Date().toISOString())
-        .order("created_at", { ascending: false }),
+        .order("created_at", { ascending: false })
+        .limit(50),
       supabase
         .from("profile_follows")
         .select("following_id")
@@ -218,7 +223,7 @@ export function ZionReels({
       }),
     );
     setFollowing((followRows ?? []).map((x) => x.following_id));
-  }, [user.id]);
+  }, [reelLimit, user.id]);
   useEffect(() => {
     void load();
     if (!supabase) return;
@@ -239,9 +244,11 @@ export function ZionReels({
     return () => void client.removeChannel(channel);
   }, [load]);
   const upload = async (file?: File) => {
-    if (!supabase || !file || !file.type.startsWith("video/")) return;
+    if (!supabase || !file || !file.type.startsWith("video/")) return false;
     setUploading(true);
     setProgress(0);
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
     try {
       const ext =
           file.name
@@ -255,6 +262,7 @@ export function ZionReels({
         body: file,
         contentType: file.type,
         onProgress: setProgress,
+        signal: controller.signal,
       });
       const { error } = await supabase.from("zion_reels").insert({
         owner_id: user.id,
@@ -264,9 +272,13 @@ export function ZionReels({
       if (error) throw error;
       setCaption("");
       await load();
+      return true;
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Upload failed");
+      if (!(e instanceof DOMException && e.name === "AbortError"))
+        alert(e instanceof Error ? `${e.message}. Tap Share again to retry.` : "Upload failed. Tap Share again to retry.");
+      return false;
     } finally {
+      uploadAbortRef.current = null;
       setUploading(false);
     }
   };
@@ -276,8 +288,11 @@ export function ZionReels({
       !file ||
       (!file.type.startsWith("video/") && !file.type.startsWith("image/"))
     )
-      return;
+      return false;
     setUploading(true);
+    setProgress(0);
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
     try {
       const ext =
           file.name
@@ -291,6 +306,7 @@ export function ZionReels({
         body: file,
         contentType: file.type,
         onProgress: setProgress,
+        signal: controller.signal,
       });
       const { error } = await supabase.from("zion_stories").insert({
         owner_id: user.id,
@@ -300,9 +316,13 @@ export function ZionReels({
       });
       if (error) throw error;
       await load();
+      return true;
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Story upload failed");
+      if (!(e instanceof DOMException && e.name === "AbortError"))
+        alert(e instanceof Error ? `${e.message}. Tap Share again to retry.` : "Story upload failed. Tap Share again to retry.");
+      return false;
     } finally {
+      uploadAbortRef.current = null;
       setUploading(false);
     }
   };
@@ -444,6 +464,7 @@ export function ZionReels({
     setPendingUpload({ file, kind, preview: URL.createObjectURL(file) });
   };
   const cancelUpload = () => {
+    uploadAbortRef.current?.abort();
     if (pendingUpload) URL.revokeObjectURL(pendingUpload.preview);
     setPendingUpload(null);
     setCaption("");
@@ -451,8 +472,10 @@ export function ZionReels({
   const confirmUpload = async () => {
     if (!pendingUpload) return;
     const selected = pendingUpload;
-    if (selected.kind === "reel") await upload(selected.file);
-    else await uploadStory(selected.file);
+    const succeeded = selected.kind === "reel"
+      ? await upload(selected.file)
+      : await uploadStory(selected.file);
+    if (!succeeded) return;
     URL.revokeObjectURL(selected.preview);
     setPendingUpload(null);
     setCaption("");
@@ -524,6 +547,11 @@ export function ZionReels({
             }
           />
         ))}
+        {hasMoreReels ? (
+          <button className="reels-load-more" onClick={() => setReelLimit((value) => value + 20)}>
+            Load more reels
+          </button>
+        ) : null}
       </main>
       {commentsFor ? (
         <aside className="reel-comments">

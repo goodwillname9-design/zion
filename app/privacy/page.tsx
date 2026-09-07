@@ -1,0 +1,7 @@
+import Link from "next/link";
+
+export const metadata = { title: "Privacy & Safety · ZION" };
+
+export default function PrivacyPage() {
+  return <main className="legal-page"><article><Link href="/">← Back to ZION</Link><h1>Privacy & Safety</h1><p>Last updated: 6 September 2026</p><h2>What ZION stores</h2><p>ZION stores the account details, social activity and content needed to provide profiles, chats, calls, stories, reels and games. Never post information you do not want the intended audience to receive.</p><h2>Private messages and media</h2><p>Access is restricted by authenticated database and storage policies. View-once media becomes unavailable for new access after it is consumed. Calls use encrypted transport; ZION does not claim independently verified end-to-end encryption for calls.</p><h2>Safety and moderation</h2><p>Users can block and report accounts or conversations. The designated ZION owner can moderate accounts and remove reported content. Automated abuse limits protect high-volume actions.</p><h2>Operational data</h2><p>Minimal error codes and routes may be retained for up to 30 days. Message bodies and private media are not included in error logs.</p><h2>Your choices</h2><p>Use profile privacy controls to manage visibility. Contact the ZION operator to request account or data deletion. Backups may retain encrypted recovery copies for the configured backup retention period.</p></article></main>;
+}
