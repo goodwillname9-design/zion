@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -33,6 +33,7 @@ export function MeetingRoom() {
   const [serverUrl, setServerUrl] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const connectingRef=useRef(false);
   const [showPasscode, setShowPasscode] = useState(false);
   const [copied, setCopied] = useState(false);
   const connectionError = (message: string) => /invalid token/i.test(message)
@@ -53,13 +54,14 @@ export function MeetingRoom() {
 
   const connect = async (meetingOverride?: string, passcodeOverride?: string) => {
     const requestedMeeting = (meetingOverride ?? meetingId).trim().toUpperCase();
-    const requestedPasscode = passcodeOverride ?? passcode;
+    const requestedPasscode = (passcodeOverride ?? passcode).trim();
     if (!supabase) return setError("Supabase is not configured.");
     if (requestedMeeting.length < 6 || requestedPasscode.length < 6)
       return setError(
         "Enter the Meeting ID and a passcode of at least 6 characters.",
       );
-    if (busy) return;
+    if (connectingRef.current) return;
+    connectingRef.current=true;
     setBusy(true);
     setError("");
     try {
@@ -86,10 +88,12 @@ export function MeetingRoom() {
     } catch {
       setError("Meeting connection timed out or the network failed. Please retry.");
     } finally {
+      connectingRef.current=false;
       setBusy(false);
     }
   };
   const createMeeting = async () => {
+    if(connectingRef.current)return;
     if (passcode.trim().length < 6)
       return setError("Choose your own meeting password: at least 6 characters.");
     const newMeetingId = makeCode();

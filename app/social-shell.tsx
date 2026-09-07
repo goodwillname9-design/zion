@@ -41,6 +41,8 @@ import type { RealtimeChannel, User } from "@supabase/supabase-js";
 
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
+import {uniqueGameInvites} from "@/lib/game-invites";
+import {useGameLaunch} from "@/lib/use-game-launch";
 import {
   decryptFile,
   decryptGroupText,
@@ -359,9 +361,11 @@ export function SocialShell() {
   const [profile, setProfile] = useState<ZionProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [friendsOpen, setFriendsOpen] = useState(false);
+  const {gameId:autoGameId,clearGame}=useGameLaunch(user?.id);
   const [friendsInitialTab, setFriendsInitialTab] = useState<
     "friends" | "notifications" | "profile" | "communities" | "find" | "games"
   >("friends");
+  useEffect(()=>{if(!autoGameId)return;const t=window.setTimeout(()=>{setFriendsInitialTab("games");setFriendsOpen(true);},0);return()=>window.clearTimeout(t);},[autoGameId]);
   const [accountManagerOpen, setAccountManagerOpen] = useState(false);
   const [reelsOpen, setReelsOpen] = useState(false);
   const [error, setError] = useState("");
@@ -494,7 +498,7 @@ export function SocialShell() {
           .gt("created_at", notificationSeenAtRef.current),
         client
           .from("friend_games")
-          .select("id", { count: "exact", head: true })
+          .select("id,inviter_id,game_type,participant_ids,status")
           .contains("participant_ids", [user.id])
           .not("accepted_ids", "cs", `{${user.id}}`)
           .eq("status", "pending")
@@ -514,7 +518,7 @@ export function SocialShell() {
       ]);
       setNotificationCount(
         (friendRequests.count ?? 0) +
-          (gameInvites.count ?? 0) +
+          uniqueGameInvites(gameInvites.data ?? []).length +
           (activities.count ?? 0),
       );
       setFriendUnreadCount(unreadMessages.count ?? 0);
@@ -600,6 +604,7 @@ export function SocialShell() {
             payload.eventType !== "INSERT" ||
             row.status !== "pending" ||
             !row.inviter_id ||
+            row.inviter_id === user.id ||
             !gameRow.participant_ids?.includes(user.id)
           )
             return;
@@ -752,6 +757,8 @@ export function SocialShell() {
       />
       {friendsOpen ? (
         <FriendsPanel
+          requestedGameId={autoGameId}
+          onRequestedGameOpened={clearGame}
           user={user}
           profile={profile}
           initialTab={friendsInitialTab}
@@ -1357,6 +1364,7 @@ function BanScreen({ reason }: { reason: string | null }) {
 }
 
 function FriendsPanel({
+  requestedGameId, onRequestedGameOpened,
   user,
   profile,
   initialTab,
@@ -1364,6 +1372,8 @@ function FriendsPanel({
   onNotificationsSeen,
   onClose,
 }: {
+  requestedGameId?:string|null;
+  onRequestedGameOpened?:()=>void;
   user: User;
   profile: ZionProfile;
   initialTab:
@@ -1406,6 +1416,7 @@ function FriendsPanel({
     null,
   );
   const profileFileRef = useRef<HTMLInputElement>(null);
+  useEffect(()=>{if(!requestedGameId)return;const timer=window.setTimeout(()=>{setSelected(null);setInspectedProfile(null);setConnectionView(null);setSettingsOpen(false);setGameToOpen(requestedGameId);setActiveTab("games");onRequestedGameOpened?.();},0);return()=>window.clearTimeout(timer);},[requestedGameId,onRequestedGameOpened]);
   const [theme, setTheme] = useState<"dark" | "day">(() =>
     typeof window !== "undefined" &&
     localStorage.getItem("zion-theme") === "day"
@@ -1502,7 +1513,7 @@ function FriendsPanel({
       followers: followerCount.count ?? 0,
       following: followingCount.count ?? 0,
     });
-    setGameInvites((inviteRows as GameInvite[] | null) ?? []);
+    setGameInvites(uniqueGameInvites((inviteRows as GameInvite[] | null) ?? []));
     const seenActivityKeys = new Set<string>();
     const activities = ((activityRows as ActivityNotice[] | null) ?? []).filter(
       (notice) => {

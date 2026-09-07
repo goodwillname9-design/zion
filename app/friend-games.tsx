@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chess } from "chess.js";
 import Link from "next/link";
 import { ArrowLeft, Crown, Gamepad2, RotateCcw, Swords } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 
 import { supabase } from "@/lib/supabase";
+import {uniqueGameInvites} from "@/lib/game-invites";
 import type { ZionProfile } from "./experience";
 import { GameVoice } from "./game-voice";
 
@@ -70,6 +71,7 @@ export function FriendGames({
   const [ludoPlayerCount, setLudoPlayerCount] = useState<2 | 3 | 4>(2);
   const [gameType, setGameType] = useState<GameType>("ludo");
   const [busy, setBusy] = useState(false);
+  const inviteBusyRef=useRef(false);
   const [moveBusy, setMoveBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [syncStatus, setSyncStatus] = useState<"connecting" | "live">(
@@ -89,7 +91,7 @@ export function FriendGames({
       .limit(30);
     if (error) setNotice(error.message);
     else {
-      const rows = (data as GameRow[] | null) ?? [];
+      const rows = uniqueGameInvites((data as GameRow[] | null) ?? []);
       setGames(rows);
       setSelected(
         (current) => rows.find((row) => row.id === current?.id) ?? current,
@@ -118,10 +120,7 @@ export function FriendGames({
             ) {
               window.setTimeout(() => setSelected(incoming), 0);
             }
-            return [
-              incoming,
-              ...current.filter((item) => item.id !== incoming.id),
-            ];
+            return uniqueGameInvites([incoming,...current.filter((item) => item.id !== incoming.id)]);
           });
           setSelected((current) =>
             current?.id === incoming.id ? incoming : current,
@@ -164,7 +163,7 @@ export function FriendGames({
         "Friend");
 
   const invite = async () => {
-    if (!supabase || busy) return;
+    if (!supabase || inviteBusyRef.current) return;
     const chosenIds =
       gameType === "ludo"
         ? ludoFriendships.slice(0, ludoPlayerCount - 1)
@@ -182,9 +181,11 @@ export function FriendGames({
       return;
     }
     const players = [user.id, ...chosen.map((item) => item.profile.id)];
+    inviteBusyRef.current=true;
     setBusy(true);
     setNotice("");
-    const { error } = await supabase.from("friend_games").insert({
+    try {
+    const { data, error } = await supabase.from("friend_games").insert({
       friendship_id: chosen[0].friendshipId,
       inviter_id: user.id,
       opponent_id: chosen[0].profile.id,
@@ -193,10 +194,11 @@ export function FriendGames({
       game_type: gameType,
       state: initialState(gameType, players),
       current_turn: user.id,
-    });
-    setNotice(error ? error.message : `${labels[gameType]} invitation sent.`);
-    setBusy(false);
+    }).select("*").single();
+    if(!error&&data)window.dispatchEvent(new CustomEvent("zion-game-invited",{detail:data}));
+    setNotice(error ? (error.code==="23505" ? "Invitation already sent. Wait for your friend to accept or decline." : error.message) : `${labels[gameType]} invitation sent.`);
     await load();
+    }catch{setNotice("Could not send invitation. Please retry.");}finally{inviteBusyRef.current=false;setBusy(false);}
   };
 
   const respond = async (game: GameRow, accept: boolean) => {
@@ -219,12 +221,14 @@ export function FriendGames({
   };
 
   const playAgain = async (game: GameRow) => {
-    if (!supabase || busy) return;
+    if (!supabase || inviteBusyRef.current) return;
     const otherPlayers = game.participant_ids.filter((id) => id !== user.id);
     if (!otherPlayers.length) return;
     const players = [user.id, ...otherPlayers];
+    inviteBusyRef.current=true;
     setBusy(true);
     setNotice("");
+    try {
     const { data, error } = await supabase
       .from("friend_games")
       .insert({
@@ -237,15 +241,16 @@ export function FriendGames({
         state: initialState(game.game_type, players),
         current_turn: user.id,
       })
-      .select("id")
+      .select("*")
       .single();
-    setBusy(false);
-    if (error) return setNotice(error.message);
+    if (error) return setNotice(error.code==="23505" ? "Invitation already sent. Wait for your friend to accept or decline." : error.message);
+    if(data)window.dispatchEvent(new CustomEvent("zion-game-invited",{detail:data}));
     setSelected(null);
     setNotice(
       `${labels[game.game_type]} Play Again invitation sent. It starts when ${otherPlayers.length === 1 ? "your friend accepts" : "all invited friends accept"}.`,
     );
     if (data?.id) await load();
+    }catch{setNotice("Could not send invitation. Please retry.");}finally{inviteBusyRef.current=false;setBusy(false);}
   };
 
   const saveMove = async (

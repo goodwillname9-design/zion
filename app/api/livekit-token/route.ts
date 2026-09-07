@@ -2,6 +2,7 @@ import { createHmac } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { AccessToken } from "livekit-server-sdk";
+import { livekitConfig } from '@/lib/livekit-config';
 
 export const runtime = "nodejs";
 
@@ -9,9 +10,11 @@ const clean = (value: unknown, max: number) =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
 
 export async function POST(request: NextRequest) {
-  const livekitUrl = process.env.LIVEKIT_URL || process.env.NEXT_PUBLIC_LIVEKIT_URL;
-  const apiKey = process.env.LIVEKIT_API_KEY;
-  const apiSecret = process.env.LIVEKIT_API_SECRET;
+  let config:ReturnType<typeof livekitConfig>;
+  try {config=livekitConfig(process.env);} catch {
+    return NextResponse.json({error:'Meeting service settings are missing or invalid. The owner must check the LiveKit URL, API key and secret in Vercel, then redeploy.',code:'MEETING_CONFIG_INVALID'},{status:503});
+  }
+  const {serverUrl:livekitUrl,apiUrl,apiKey,apiSecret}=config;
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!livekitUrl || !apiKey || !apiSecret || !supabaseUrl || !supabaseKey)
@@ -54,9 +57,22 @@ export async function POST(request: NextRequest) {
     .slice(0, 32)}`;
   const { data: profile } = await authClient
     .from("profiles")
-    .select("username")
+    .select("username,is_banned")
     .eq("id", data.user.id)
     .maybeSingle();
+  if(!profile||profile.is_banned)return NextResponse.json({error:'An active ZION profile is required.'},{status:403});
+  // Verify that the deployed URL and key pair are accepted by that LiveKit server.
+  // This read-only preflight does not create a room or send the secret to the browser.
+  const serviceToken=new AccessToken(apiKey,apiSecret,{ttl:'1m'});
+  serviceToken.addGrant({roomList:true});
+  try {
+    const check=await fetch(`${apiUrl}/twirp/livekit.RoomService/ListRooms`,{
+      method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${await serviceToken.toJwt()}`},
+      body:JSON.stringify({names:[roomName]}),signal:AbortSignal.timeout(7000),cache:'no-store',redirect:'error',
+    });
+    if(check.status===401||check.status===403)return NextResponse.json({error:'LiveKit rejected the server credentials. The owner must replace the LiveKit key and secret using the same project as the URL, then redeploy. Changing the meeting password will not fix this.',code:'LIVEKIT_CREDENTIALS_REJECTED'},{status:503});
+    if(!check.ok)return NextResponse.json({error:'Meeting server is unavailable. Please retry later.',code:'LIVEKIT_UNAVAILABLE'},{status:503});
+  }catch{return NextResponse.json({error:'Could not reach the meeting server. Check the LiveKit URL and retry.',code:'LIVEKIT_UNREACHABLE'},{status:503});}
   const token = new AccessToken(apiKey, apiSecret, {
     identity: data.user.id,
     name: clean(profile?.username, 40) || "ZION participant",
@@ -73,5 +89,5 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     token: await token.toJwt(),
     serverUrl: livekitUrl,
-  });
+  }, {headers:{'Cache-Control':'no-store'}});
 }

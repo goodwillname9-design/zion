@@ -1,0 +1,24 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),ts=require('typescript');
+function load(file){const ctx={exports:{},URL};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,ctx);return ctx.exports;}
+const {uniqueGameInvites:unique,shouldLaunchGame:launch}=load('lib/game-invites.ts');
+const a={id:'1',inviter_id:'a',game_type:'ludo',status:'pending',participant_ids:['a','b']};
+assert.equal(unique([a,{...a,id:'2',participant_ids:['b','a']}]).length,1);
+assert.equal(unique([a,{...a,id:'3',participant_ids:['a','c']}]).length,2);
+assert.equal(unique([a,{...a,id:'4',game_type:'chess'}]).length,2);
+assert.equal(unique([a,{...a,id:'5',inviter_id:'b'}]).length,2);
+assert.equal(unique([{...a,status:'active'},{...a,id:'6',status:'active'}]).length,2);
+assert.equal(unique([a,a]).length,1);
+const pending=new Set();
+assert.equal(launch(pending,{...a,accepted_ids:['a']},'a'),false);
+assert.equal(launch(pending,{...a,status:'active',accepted_ids:['a','b']},'a'),true);
+assert.equal(launch(pending,{...a,status:'active',accepted_ids:['a','b']},'a'),false);
+assert.equal(launch(new Set(),{...a,status:'active',accepted_ids:['a','b']},'a'),false);
+assert.equal(launch(new Set(),{...a,accepted_ids:['a']},'b'),false);
+const {livekitConfig:config}=load('lib/livekit-config.ts');
+const env={LIVEKIT_URL:' "https://sample.livekit.cloud/" ',LIVEKIT_API_KEY:' key ',LIVEKIT_API_SECRET:' "secret" '};
+assert.equal(config(env).serverUrl,'wss://sample.livekit.cloud');assert.equal(config(env).apiSecret,'secret');
+assert.throws(()=>config({...env,LIVEKIT_URL:'wss://sample.livekit.cloud/path'}));
+assert.throws(()=>config({...env,LIVEKIT_API_SECRET:''}));
+assert.throws(()=>config({...env,LIVEKIT_API_KEY:'two words'}));
+assert.throws(()=>config({...env,LIVEKIT_URL:'https://user:pass@sample.livekit.cloud'}));
+console.log('17 invitation, auto-launch and meeting configuration assertions passed');
