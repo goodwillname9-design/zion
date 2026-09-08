@@ -92,13 +92,18 @@ export default function CityGame() {
       const facades = ['#827b6f','#b0a58f','#737f83','#8a857b'].map(facade);
       box(scene, asphalt, 0,-.25,0,245,.5,245);
       const obstacles: { x: number; z: number; w: number; d: number }[] = [];
+      const walls:InstanceType<typeof T.Mesh>[]=[];
+      const sand=mat('#bd9e70');box(scene,sand,0,.03,-98,245,.06,49);
+      // A fictional Kuwait-inspired desert boundary, not surveyed real geography.
+      for(let i=0;i<22;i++){const dune=new T.Mesh(sphereGeo,sand);dune.position.set(-116+rand()*232,-.8,-96-rand()*22);dune.scale.set(7+rand()*8,1.4+rand(),4+rand()*5);dune.receiveShadow=true;scene.add(dune);}
       for (const x of [-84,-42,0,42,84]) {
         for(let z=-112;z<116;z+=8) { box(scene,white,x,.016,z,.12,.02,3); box(scene,white,z,.016,x,3,.02,.12); }
       }
       for (const x of [-105,-63,-21,21,63,105]) for (const z of [-105,-63,-21,21,63,105]) {
+        if(z===-105)continue;
         box(scene,concrete,x,.13,z,28,.26,28);
         const height = 7+rand()*26, w = 15+rand()*5, d = 15+rand()*5;
-        box(scene,facades[Math.floor(rand()*4)],x,height/2+.25,z,w,height,d);
+        walls.push(box(scene,facades[Math.floor(rand()*4)],x,height/2+.25,z,w,height,d));
         box(scene,dark,x,height+.4,z,w+.5,.5,d+.5);
         box(scene,concrete,x+2,height+1,z,3,1.5,3);
         obstacles.push({x,z,w:w/2+.5,d:d/2+.5});
@@ -123,6 +128,9 @@ export default function CityGame() {
           box(g,paint,0,.65,0,1.85,.55,4); box(g,paint,0,.95,-.2,1.75,.35,3.1);
           box(g,glass,0,1.3,-.25,1.5,.6,1.8); box(g,paint,0,1.64,-.25,1.55,.1,1.9);
           box(g,chrome,0,.47,2.02,1.8,.12,.12); box(g,chrome,0,.47,-2.02,1.8,.12,.12);
+          // Door seams, handles, mirrors and grille give the generated vehicles more definition.
+          for(const side of [-1,1]){box(g,dark,side*.929,.85,0,.012,.42,.025);box(g,chrome,side*.94,1.01,-.45,.02,.05,.22);box(g,paint,side*1.01,1.25,.65,.28,.14,.25);}
+          for(let grille=-.4;grille<=.4;grille+=.13)box(g,dark,grille,.68,2.015,.055,.2,.025);
           for (const x of [-.6,.6]) { box(g,white,x,.85,2.025,.45,.2,.03); box(g,vehicleMaterials[0],x,.85,-2.025,.45,.2,.03); }
         }
         const wheels: InstanceType<typeof T.Mesh>[] = [];
@@ -131,8 +139,8 @@ export default function CityGame() {
         }
         scene.add(g); return { group:g,wheels,bike };
       }
-      const parked = Array.from({length:10},(_,i)=>{
-        const v=car(i,i===1||i===6); v.group.position.set(i<3?6:(i%2?48:-48),0,i<3?8+i*7:-80+i*15); return v;
+      const parked = Array.from({length:18},(_,i)=>{
+        const v=car(i,i===1||i===6||i===12); v.group.position.set(i<3?6:(i%2?48:-48),0,i<3?8+i*7:-65+(i%9)*18); return v;
       });
       function person(color: string) {
         const g=new T.Group(), clothes=mat(color); const limbs: InstanceType<typeof T.Mesh>[]=[];
@@ -143,7 +151,22 @@ export default function CityGame() {
         scene.add(g);return {group:g,limbs};
       }
       const player=person('#d0b894');
-      const npcs=Array.from({length:20},(_,i)=>({ ...person(['#52606b','#857564','#5b4543'][i%3]), baseX: [-75,-33,9,51,93][i%5], phase:i*7 }));
+      const gun=new T.Group();player.group.add(gun);gun.position.set(.3,1.32,.3);
+      box(gun,dark,0,0,.18,.12,.13,.48);box(gun,chrome,0,.025,.24,.11,.09,.36);box(gun,dark,0,-.14,0,.1,.22,.13);
+      const npcs=Array.from({length:32},(_,i)=>({ ...person(['#52606b','#857564','#5b4543','#d6d0bd'][i%4]), baseX: [-75,-33,9,51,93][i%5], phase:i*7, health:100,downUntil:0 }));
+      function animal(kind:'camel'|'dog'|'cat',px:number,pz:number){
+        const g=new T.Group(),camel=kind==='camel',cat=kind==='cat';const fur=mat(camel?'#a88457':cat?'#b6aba0':'#766453');
+        const length=camel?2.3:cat?.65:1.05,height=camel?1.8:cat?.35:.6;
+        const part=(x:number,y:number,z:number,sx:number,sy:number,sz:number)=>{const m=new T.Mesh(sphereGeo,fur);m.position.set(x,y,z);m.scale.set(sx,sy,sz);m.castShadow=true;g.add(m);return m;};
+        part(0,height,0,length*.24,height*.3,length*.5);
+        if(camel){part(0,height+.5,-.1,.4,.7,.6);const neck=part(0,height+.65,.9,.22,.95,.25);neck.rotation.x=.3;}
+        part(0,height+(camel?1.5:.1),length*.58,length*.18,height*.2,length*.22);
+        const legs=[];for(const side of [-1,1])for(const end of [-1,1])legs.push(part(side*length*.18,height*.45,end*length*.32,length*.055,height*.5,length*.06));
+        for(const side of [-1,1])part(side*length*.1,height+(camel?1.85:height*.4),length*.6,.06,cat?.12:.09,.06);
+        const tail=part(0,height,-length*.6,.045,cat?.3:.2,.045);tail.rotation.x=-.8;
+        g.position.set(px,0,pz);scene.add(g);return {group:g,legs,px,pz,camel};
+      }
+      const animals=[...Array.from({length:5},(_,i)=>animal('camel',64+i*7,-100)),...Array.from({length:8},(_,i)=>animal(i%2?'dog':'cat',9+(i%3)*42,-45+i*17))];
       const traffic=Array.from({length:8},(_,i)=>({ ...car(i), lane:[-80,-38,4,46][i%4], offset:i*27 }));
       const remotePlayers = new Map<string,{ human:ReturnType<typeof person>; car:ReturnType<typeof car>; bike:ReturnType<typeof car>; label:InstanceType<typeof T.Sprite>; username:string }>();
       const remoteLabel = (username:string) => {
@@ -157,7 +180,7 @@ export default function CityGame() {
       box(scene,mat('#47766f'),shop.x,1.8,shop.z,2.5,3.6,2.5);
       const targetMat=mat('#bf6553');
       const targets=[-5,0,5].map(dx=>box(scene,targetMat,shop.x+dx,1.5,shop.z+12,1.4,2,.3));
-      let x=3,z=3,yaw=0,speed=0,elapsed=0,last=0,frame=0,report=0,frames=0,reportTime=0,active=-1,shotUntil=0;
+      let x=3,z=3,yaw=0,speed=0,elapsed=0,last=0,frame=0,report=0,frames=0,reportTime=0,active=-1,shotUntil=0,lastShot=-1,reloadUntil=0;
       const traceGeo=new T.BufferGeometry().setFromPoints([new T.Vector3(),new T.Vector3()]);geometries.add(traceGeo);
       const traceMat=new T.LineBasicMaterial({color:'#ffe4a0'});materials.add(traceMat);
       const trace=new T.Line(traceGeo,traceMat);trace.visible=false;scene.add(trace);
@@ -177,26 +200,38 @@ export default function CityGame() {
           }
         }
         if(name==='shop') {
-          if(Math.hypot(x-shop.x,z-shop.z)>9){setNotice('Visit RANGE SUPPLY, marked S on the map.');return;}
-          if(saveRef.current.owns){setNotice('Range gear owned. Stand near the targets, face them and press Fire.');return;}
-          if(saveRef.current.cash<300){setNotice('Range gear costs $300 game money. Complete deliveries first.');return;}
-          persist({...saveRef.current,cash:saveRef.current.cash-300,owns:true});setNotice('Range gear purchased. Target practice unlocked.');
+          if(Math.hypot(x-shop.x,z-shop.z)>9){setNotice('Visit the gun shop, marked S on the map.');return;}
+          if(saveRef.current.owns){persist({...saveRef.current,ammo:12,reserve:60});setNotice('Ammo resupplied. Face your target and press Fire.');return;}
+          if(saveRef.current.cash<300){setNotice('Gun costs $300 game money. Complete deliveries first.');return;}
+          persist({...saveRef.current,cash:saveRef.current.cash-300,owns:true,ammo:12,reserve:60});setNotice('Gun purchased. Fire: F · Reload: R. Local NPC combat only.');
+        }
+        if(name==='reload'){
+          if(!saveRef.current.owns||reloadUntil>elapsed)return;
+          if(saveRef.current.ammo===12)return;
+          if(!saveRef.current.reserve){setNotice('Visit S for free ammo resupply.');return;}
+          reloadUntil=elapsed+1.2;setNotice('Reloading…');
         }
         if(name==='fire') {
-          if(!saveRef.current.owns){setNotice('Buy range gear from RANGE SUPPLY first ($300).');return;}
-          if(active>=0||Math.hypot(x-shop.x,z-shop.z)>20){setNotice('Target practice is available on foot in the range area.');return;}
+          if(!saveRef.current.owns){setNotice('Buy a gun from S first ($300 game money).');return;}
+          if(active>=0){setNotice('Exit the vehicle to use your gun.');return;}
+          if(reloadUntil>elapsed||elapsed-lastShot<.3)return;
+          if(!saveRef.current.ammo){setNotice('Empty magazine. Press R / Reload.');return;}
+          lastShot=elapsed;persist({...saveRef.current,ammo:saveRef.current.ammo-1});
           const origin=new T.Vector3(x,1.5,z),dir=new T.Vector3(Math.sin(yaw),0,Math.cos(yaw));
-          const ray=new T.Raycaster(origin,dir,0,25);const hit=ray.intersectObjects(targets,false)[0];
-          const end=hit?hit.point:origin.clone().addScaledVector(dir,25);
+          scene.updateMatrixWorld(true);
+          const ray=new T.Raycaster(origin,dir,0,45);const hit=ray.intersectObjects([...walls,...targets,...npcs.filter(p=>p.health>0).map(p=>p.group)],true)[0];
+          const end=hit?hit.point:origin.clone().addScaledVector(dir,45);
           const attr=traceGeo.getAttribute('position');attr.setXYZ(0,origin.x,origin.y,origin.z);attr.setXYZ(1,end.x,end.y,end.z);attr.needsUpdate=true;traceGeo.computeBoundingSphere();
           trace.visible=true;shotUntil=elapsed+.12;
-          if(hit){persist({...saveRef.current,hits:saveRef.current.hits+1});setNotice('Target hit!');}else setNotice('Miss. Turn to line up a target.');
+          if(hit&&targets.some(target=>target===hit.object)){persist({...saveRef.current,hits:saveRef.current.hits+1});setNotice('Range target hit!');}
+          else if(hit){const npc=npcs.find(p=>p.group.children.includes(hit.object));if(npc){npc.health-=50;if(npc.health<=0)npc.downUntil=elapsed+12;setNotice(npc.health>0?'NPC hit.':'NPC down — respawns shortly.');}else setNotice('Shot blocked by a building.');}
+          else setNotice('Miss. Turn to line up a target.');
         }
       };
       const down=(e:KeyboardEvent)=>{
         if(e.target instanceof HTMLSelectElement||e.target instanceof HTMLInputElement)return;
         const key=e.key.toLowerCase();if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(key))e.preventDefault();
-        keys.current.add(key);if(!e.repeat){if(key==='e')action.current('vehicle');if(key==='b')action.current('shop');if(key==='f')action.current('fire');if(key==='escape')pause(!pausedRef.current);}
+        keys.current.add(key);if(!e.repeat){if(key==='e')action.current('vehicle');if(key==='b')action.current('shop');if(key==='f')action.current('fire');if(key==='r')action.current('reload');if(key==='escape')pause(!pausedRef.current);}
       };
       const up=(e:KeyboardEvent)=>keys.current.delete(e.key.toLowerCase());
       const hidden=()=>{clear();if(document.hidden)pause(true);};
@@ -211,6 +246,8 @@ export default function CityGame() {
         frame=requestAnimationFrame(tick);const dt=Math.min((now-last)/1000,.04);last=now;
         if(document.hidden||pausedRef.current)return;
         elapsed+=dt;frames++;
+        gun.visible=saveRef.current.owns&&active<0;
+        if(reloadUntil&&elapsed>=reloadUntil){const amount=Math.min(12-saveRef.current.ammo,saveRef.current.reserve);persist({...saveRef.current,ammo:saveRef.current.ammo+amount,reserve:saveRef.current.reserve-amount});reloadUntil=0;setNotice('Reloaded.');}
         if(currentQuality!==qualityRef.current){currentQuality=qualityRef.current;pixelRatio=Math.min(devicePixelRatio,currentQuality==='low'?.8:1.25);renderer.setPixelRatio(pixelRatio);renderer.shadowMap.enabled=currentQuality!=='low';resize();}
         const k=keys.current,forward=Number(k.has('w')||k.has('arrowup'))-Number(k.has('s')||k.has('arrowdown'));
         const steering=Number(k.has('a')||k.has('arrowleft'))-Number(k.has('d')||k.has('arrowright'));
@@ -222,7 +259,8 @@ export default function CityGame() {
         player.group.position.set(x,driving?.3:0,z);player.group.rotation.y=yaw;player.group.visible=!driving||parked[active].bike;
         player.limbs.forEach((l,i)=>l.rotation.x=driving?0:Math.sin(elapsed*10+i%2*Math.PI)*Math.min(.45,Math.abs(speed)*.12));
         if(driving){const v=parked[active];v.group.position.set(x,0,z);v.group.rotation.y=yaw;v.wheels.forEach(w=>w.rotation.x+=speed*dt*2);}
-        npcs.forEach((p,i)=>{const t=(elapsed*1.2+p.phase)%190-95;p.group.position.set(p.baseX,0,t);p.limbs.forEach((l,j)=>l.rotation.x=Math.sin(elapsed*6+j%2*Math.PI+i)*.4);});
+        npcs.forEach((p,i)=>{if(p.health<=0&&elapsed>=p.downUntil)p.health=100;p.group.visible=p.health>0;const t=(elapsed*1.2+p.phase)%165-70;p.group.position.set(p.baseX,0,t);p.limbs.forEach((l,j)=>l.rotation.x=Math.sin(elapsed*6+j%2*Math.PI+i)*.4);});
+        animals.forEach((a,i)=>{a.group.position.z=a.pz+Math.sin(elapsed*.1+i)*2;a.group.rotation.y=Math.cos(elapsed*.1+i)>0?0:Math.PI;a.legs.forEach((leg,j)=>leg.rotation.x=Math.sin(elapsed*3+j*Math.PI/2)*.16);});
         traffic.forEach((v,i)=>{const tz=(elapsed*(6+i%3)+v.offset)%230-115;v.group.position.set(v.lane,0,tz);v.wheels.forEach(w=>w.rotation.x+=dt*12);});
         networkPosition.current={x,z,yaw,vehicle:driving?(parked[active].bike?'Motorcycle':'Sedan'):''};
         for(const [id,remote] of remotePlayers){
@@ -240,7 +278,7 @@ export default function CityGame() {
         }
         const m=missions[saveRef.current.mission];marker.visible=!!m;
         let distance=0;if(m){marker.position.set(m.x,2+Math.sin(elapsed)*.3,m.z);marker.rotation.y=elapsed;distance=Math.hypot(x-m.x,z-m.z);
-          if(distance<4){persist({...saveRef.current,cash:saveRef.current.cash+m.reward,mission:saveRef.current.mission+1});setNotice(`Delivery complete · +$${m.reward}`);}}
+          if(distance<4&&saveRef.current.hits>=(m.requiresHits??0)){persist({...saveRef.current,cash:saveRef.current.cash+m.reward,mission:saveRef.current.mission+1});setNotice(`Mission complete · +$${m.reward}`);}}
         trace.visible=elapsed<shotUntil;
         desired.set(x-Math.sin(yaw)*(driving?10:7),driving?5.5:4,z-Math.cos(yaw)*(driving?10:7));
         camera.position.lerp(desired,1-Math.exp(-dt*5));camera.lookAt(x,1.3,z);
@@ -258,25 +296,25 @@ export default function CityGame() {
   const mission=missions[save.mission];
   return <main ref={root} className={styles.shell}>
     <div ref={host} className={styles.world}/>
-    <header className={styles.header}><Link href="/">← ZION</Link><span>ZION STORY <small>HARBOUR CITY</small></span><div><button onClick={()=>{setLobbyOpen(!lobbyOpen);pause(!lobbyOpen);}}>Friends {online.count||''}</button><button onClick={fullscreen}>Fullscreen</button>{started&&<button onClick={()=>pause(!paused)}>{paused?'Resume':'Pause'}</button>}</div></header>
-    {!started?<section className={styles.intro}><small>AN ORIGINAL CITY ADVENTURE</small><h1>Your next<br/><em>shift starts here.</em></h1><p>Explore the waterfront. Borrow a car. Make deliveries.<br/>Build your balance and unlock the practice range.</p><button onClick={()=>{setStarted(true);pause(false);}}>Enter Harbour City →</button><p className={styles.disclaimer}>Solo or private friend rooms • Procedural models, not photorealistic assets.<br/>Progress saves on this browser. No real-money purchases.</p></section>:<>
-      <section className={styles.quest}><small>CONTRACT {Math.min(save.mission+1,5)} / 5</small><h1>{mission?.name||'Shift complete'}</h1><p>{mission?.brief||'All deliveries completed. Explore or practise at the range.'}</p>{mission&&<strong>{hud.distance} m <span>· ${mission.reward} reward</span></strong>}</section>
-      <aside className={styles.wallet}><b>${save.cash.toLocaleString()}</b><small>GAME MONEY</small><span>{hud.vehicle||'On foot'} · {hud.speed} km/h</span></aside>
+    <header className={styles.header}><Link href="/">← ZION</Link><span>ZION STORY <small>GULF DISTRICT</small></span><div><button onClick={()=>{setLobbyOpen(!lobbyOpen);pause(!lobbyOpen);}}>Friends {online.count||''}</button><button onClick={fullscreen}>Fullscreen</button>{started&&<button onClick={()=>pause(!paused)}>{paused?'Resume':'Pause'}</button>}</div></header>
+    {!started?<section className={styles.intro}><small>AN ORIGINAL CITY ADVENTURE</small><h1>Your next<br/><em>shift starts here.</em></h1><p>Explore a Kuwait-inspired city and desert. Drive, deliver and discover.<br/>Earn game money, buy a gun and complete nine missions.</p><button onClick={()=>{setStarted(true);pause(false);}}>Enter Gulf District →</button><p className={styles.disclaimer}>Fictional Kuwait-inspired map • Procedural models, not photorealistic assets.<br/>Progress saves on this browser. No real-money purchases.</p></section>:<>
+      <section className={styles.quest}><small>CONTRACT {Math.min(save.mission+1,missions.length)} / {missions.length}</small><h1>{mission?.name||'Shift complete'}</h1><p>{mission?.brief||'All deliveries completed. Explore or practise at the range.'}</p>{mission&&<strong>{hud.distance} m <span>· ${mission.reward} reward</span></strong>}</section>
+      <aside className={styles.wallet}><b>${save.cash.toLocaleString()}</b><small>GAME MONEY</small>{save.owns&&<span>Ammo {save.ammo} / {save.reserve}</span>}<span>{hud.vehicle||'On foot'} · {hud.speed} km/h</span></aside>
       <button className={styles.mapButton} onClick={()=>setMapOpen(!mapOpen)} aria-label="Toggle city map">{mapOpen?'Close map':'City map'}</button>
       <div className={`${styles.map} ${mapOpen?styles.expanded:''}`}>
         <svg viewBox="-125 -125 250 250" role="img" aria-label="City map: player arrow, gold mission, S range shop">
           <rect x="-125" y="-125" width="250" height="250" fill="#232f33"/>
           {[-84,-42,0,42,84].map(v=><g key={v} stroke="#657475" strokeWidth="9"><path d={`M ${v} -125 V 125`}/><path d={`M -125 ${v} H 125`}/></g>)}
-          <path d="M -125 121 H 125" stroke="#427a8c" strokeWidth="8"/>
+          <rect x="-125" y="-125" width="250" height="45" fill="#ac936a"/><text x="0" y="-108" fontSize="10" textAnchor="middle" fill="#302e28">DESERT TRAIL</text><text x="-35" y="60" fontSize="9" fill="#d7d1bc">GULF DISTRICT</text><path d="M -125 121 H 125" stroke="#427a8c" strokeWidth="8"/>
           <circle cx={shop.x} cy={shop.z} r="8" fill="#91c9b3"/><text x={shop.x} y={shop.z+4} fontSize="11" textAnchor="middle" fill="#122322">S</text>
           {mission&&<circle cx={mission.x} cy={mission.z} r="5" fill="#efc489"/>}
           <path d="M 0 7 L -4 -4 L 0 -2 L 4 -4 Z" fill="white" transform={`translate(${hud.x} ${hud.z}) rotate(${-hud.yaw*180/Math.PI})`}/>
         </svg><small>YOU △ · MISSION ● · SHOP S</small>
       </div>
-      <p className={styles.notice} role="status">{notice||'E: enter vehicle · WASD: move · Space: brake · B: shop · F: fire'}</p>
-      <div className={styles.controls}><div className={styles.pad}>{hold('w','↑')}{hold('a','←')}{hold('s','↓')}{hold('d','→')}</div><div className={styles.actions}><button onClick={()=>action.current('vehicle')}>{hud.vehicle?'Exit':'Enter vehicle'}</button>{hold(hud.vehicle?' ':'shift',hud.vehicle?'Brake':'Run')}<button onClick={()=>action.current('shop')}>{save.owns?'Range shop':'Gear $300'}</button>{save.owns&&<button onClick={()=>action.current('fire')}>Fire</button>}</div></div>
+      <p className={styles.notice} role="status">{notice||'E: enter vehicle · WASD: move · Space: brake · B: shop · F: fire · R: reload'}</p>
+      <div className={styles.controls}><div className={styles.pad}>{hold('w','↑')}{hold('a','←')}{hold('s','↓')}{hold('d','→')}</div><div className={styles.actions}><button onClick={()=>action.current('vehicle')}>{hud.vehicle?'Exit':'Enter vehicle'}</button>{hold(hud.vehicle?' ':'shift',hud.vehicle?'Brake':'Run')}<button onClick={()=>action.current('shop')}>{save.owns?'Ammo at S':'Gun $300'}</button>{save.owns&&<><button onClick={()=>action.current('fire')}>Fire</button><button onClick={()=>action.current('reload')}>Reload</button></>}</div></div>
       <footer className={styles.footer}><span>{online.status} · {save.hits} target hits</span><label>Graphics <select value={quality} onChange={e=>{qualityRef.current=e.target.value;setQuality(e.target.value);}}><option value="balanced">Balanced</option><option value="low">Performance</option></select></label></footer>
-      {!ready&&!error&&<div className={styles.overlay}>Building Harbour City…</div>}
+      {!ready&&!error&&<div className={styles.overlay}>Building Gulf District…</div>}
       {paused&&!error&&<div className={styles.overlay}><h2>Take a breather.</h2><p>Your progress is saved on this browser.</p><button onClick={()=>pause(false)}>Continue</button><Link href="/">Back to ZION</Link></div>}
       <div className={styles.rotate}>↻ Rotate your phone for a wider view</div>
     </>}

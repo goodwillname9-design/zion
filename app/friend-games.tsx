@@ -406,9 +406,9 @@ export function FriendGames({
         </div>
       </div>
       <Link href="/city" className="new-game-card" style={{ display: 'block', marginBottom: 20, padding: 24, textDecoration: 'none', color: 'inherit', background: 'linear-gradient(120deg, #1c302b, #171426)' }}>
-        <small>ZION STORY · HARBOUR CITY</small>
+        <small>ZION STORY · GULF DISTRICT</small>
         <h2 style={{ fontSize: 26, margin: '10px 0' }}>Your next shift starts here →</h2>
-        <p>Cars, motorcycles, deliveries and private friend exploration rooms.</p>
+        <p>Kuwait-inspired city, desert trail, nine missions, gun shop and friend rooms.</p>
         <small>Original procedural city · Online rooms require the V63 SQL update.</small>
       </Link>
       {pending.map((game) => (

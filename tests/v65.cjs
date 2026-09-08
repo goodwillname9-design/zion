@@ -1,0 +1,13 @@
+const fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript'),assert=require('node:assert/strict');
+const ctx={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync('app/city/game-data.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,ctx);
+const {parseSave,missions}=ctx.exports;
+assert.equal(missions.length,9);
+assert.equal(parseSave('{"owns":true}').ammo,12);
+assert.equal(parseSave('{"ammo":-10,"reserve":999}').ammo,0);
+assert.equal(parseSave('{"ammo":-10,"reserve":999}').reserve,60);
+assert.equal(parseSave('{"mission":99}').mission,9);
+assert.equal(parseSave('broken').owns,false);
+assert(missions.slice(0,5).reduce((v,m)=>v+m.reward,0)>=300);
+assert(missions.every(m=>Math.abs(m.x)<119&&Math.abs(m.z)<120));
+assert.equal(missions[5].requiresHits,5);
+console.log('9 Gulf District save/mission assertions passed');
