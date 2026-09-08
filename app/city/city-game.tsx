@@ -24,6 +24,8 @@ export default function CityGame() {
   const [notice, setNotice] = useState('');
   const [quality, setQuality] = useState('balanced');
   const [hud, setHud] = useState<Hud>({ x: 3, z: 3, yaw: 0, speed: 0, vehicle: '', distance: 0, nearShop: false, fps: 0 });
+  const [health,setHealth]=useState(100);
+  const aim=useRef<{id:number;x:number}|null>(null);
   const [mapOpen, setMapOpen] = useState(false);
   const networkPosition = useRef<Position>({x:3,z:3,yaw:0,vehicle:''});
   const online = useCityOnline(networkPosition);
@@ -57,13 +59,10 @@ export default function CityGame() {
         import('three/addons/environments/RoomEnvironment.js'),
       ]);
       const loader = new GLTFLoader();
-      const [carAsset, humanAsset] = await Promise.all([
-        loader.loadAsync('/game-assets/car-concept.glb'),
-        loader.loadAsync('/game-assets/cesium-man.glb'),
-      ]);
+      const humanAsset = await loader.loadAsync('/game-assets/cesium-man.glb');
       const releaseAssets = () => {
         const released = new Set<unknown>();
-        for(const asset of [carAsset,humanAsset])asset.scene.traverse(object=>{
+        for(const asset of [humanAsset])asset.scene.traverse(object=>{
           if(!(object instanceof T.Mesh))return;
           if(!released.has(object.geometry)){object.geometry.dispose();released.add(object.geometry);}
           for(const material of Array.isArray(object.material)?object.material:[object.material])if(!released.has(material)){
@@ -75,22 +74,22 @@ export default function CityGame() {
       if (disposed || !host.current) { releaseAssets(); return; }
       cleanup=releaseAssets;
       const container = host.current;
-      const scene = new T.Scene(); scene.background = new T.Color('#a6b9c1'); scene.fog = new T.Fog('#a6b9c1', 90, 240);
-      const renderer = new T.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-      renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
-      renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
+      const scene = new T.Scene(); scene.background = new T.Color('#9aaca0'); scene.fog = new T.Fog('#9aaca0', 38, 145);
+      const renderer = new T.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 1));
+      renderer.shadowMap.enabled = false; renderer.shadowMap.type = T.PCFSoftShadowMap;
       renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
       container.appendChild(renderer.domElement);
       cleanup=()=>{releaseAssets();renderer.dispose();renderer.domElement.remove();};
       const camera = new T.PerspectiveCamera(58, 1, .1, 280);
-      scene.add(new T.HemisphereLight('#c2d8ef', '#5b544b', 2.5));
-      const sun = new T.DirectionalLight('#ffe0af', 3); sun.position.set(-50, 90, 45); sun.castShadow = true;
+      scene.add(new T.HemisphereLight('#c2d8cf', '#343e29', 1.8));
+      const sun = new T.DirectionalLight('#ffe0af', 2); sun.position.set(-50, 90, 45); sun.castShadow = true;
       sun.shadow.mapSize.set(1024, 1024); Object.assign(sun.shadow.camera, { left: -60, right: 60, top: 60, bottom: -60, far: 190 });
       sun.shadow.bias = -.001; scene.add(sun, sun.target);
       const geometries = new Set<InstanceType<typeof T.BufferGeometry>>();
       const materials = new Set<InstanceType<typeof T.Material>>();
       const textures: InstanceType<typeof T.Texture>[] = [];
-      for (const asset of [carAsset, humanAsset]) asset.scene.traverse(object => {
+      for (const asset of [humanAsset]) asset.scene.traverse(object => {
         if (!(object instanceof T.Mesh)) return;
         geometries.add(object.geometry);
         for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
@@ -104,86 +103,42 @@ export default function CityGame() {
       const environment = pmrem.fromScene(roomEnvironment, .04);
       scene.environment = environment.texture;
       roomEnvironment.dispose(); pmrem.dispose();
-      // Normalize once; clones share GPU resources. Distance LOD bounds car cost.
-      function normalizeModel(model: InstanceType<typeof T.Object3D>, dimension: 'height'|'length', size: number) {
-        const bounds = new T.Box3().setFromObject(model), extent = bounds.getSize(new T.Vector3());
-        const scale = size / (dimension === 'height' ? extent.y : Math.max(extent.x, extent.z));
-        const wrapper = new T.Group(); wrapper.add(model); wrapper.scale.setScalar(scale);
-        const center = bounds.getCenter(new T.Vector3()); model.position.sub(new T.Vector3(center.x, bounds.min.y, center.z));
-        return wrapper;
-      }
-      const detailedCar = normalizeModel(carAsset.scene, 'length', 4.2);
-      const carLods: InstanceType<typeof T.LOD>[] = [];
       const mixers: InstanceType<typeof T.AnimationMixer>[] = [];
       const boxGeo = new T.BoxGeometry(1, 1, 1); geometries.add(boxGeo);
       const sphereGeo = new T.SphereGeometry(1, 12, 8); geometries.add(sphereGeo);
       const wheelGeo = new T.CylinderGeometry(.36, .36, .22, 14); geometries.add(wheelGeo);
       const mat = (color: string, metalness = 0, roughness = .8) => { const m = new T.MeshStandardMaterial({ color, metalness, roughness }); materials.add(m); return m; };
-      const asphalt = mat('#484b4c'), concrete = mat('#a3a29a'), white = mat('#dedacb'), dark = mat('#182128'), rubber = mat('#151719'), chrome = mat('#a5acb0', .8, .2);
-      const textureLoader = new T.TextureLoader();
-      for (const [slot, file] of [['map','diffuse'],['normalMap','nor_gl'],['roughnessMap','rough']] as const) {
-        textureLoader.load(`/game-assets/asphalt-${file}.jpg`, texture => {
-          if (disposed) { texture.dispose(); return; }
-          texture.wrapS = texture.wrapT = T.RepeatWrapping; texture.repeat.set(65,65);
-          texture.anisotropy = Math.min(8,renderer.capabilities.getMaxAnisotropy());
-          if (slot === 'map') texture.colorSpace = T.SRGBColorSpace;
-          textures.push(texture); asphalt[slot] = texture; asphalt.color.set('#ffffff'); asphalt.needsUpdate = true;
-        }, undefined, () => setNotice('Road texture could not load. Reload to retry.'));
-      }
-      const glass = mat('#385160', .65, .15), green = mat('#4c6147');
+      const concrete = mat('#a3a29a'), white = mat('#dedacb'), dark = mat('#182128'), rubber = mat('#151719'), chrome = mat('#a5acb0', .8, .2);
+      const glass = mat('#385160', .3, .3), green = mat('#395a34');
       const box = (parent: InstanceType<typeof T.Object3D>, m: InstanceType<typeof T.Material>, x: number, y: number, z: number, w: number, h: number, d: number) => {
         const o = new T.Mesh(boxGeo, m); o.position.set(x,y,z); o.scale.set(w,h,d); o.castShadow = o.receiveShadow = true; parent.add(o); return o;
       };
       let seed = 635;
       const rand = () => { seed = (1664525 * seed + 1013904223) >>> 0; return seed / 4294967296; };
-      const facades = ['#d7c8ac','#bdb5a4','#a3b5bd','#cabba7'].map(c=>mat(c,0,.85));
-      for (const [slot,file] of [['map','diffuse'],['normalMap','nor_gl'],['roughnessMap','rough']] as const) {
-        textureLoader.load(`/game-assets/concrete-${file}.jpg`, texture=>{
-          if(disposed){texture.dispose();return;}
-          texture.wrapS=texture.wrapT=T.RepeatWrapping;texture.repeat.set(5,5);
-          texture.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());
-          if(slot==='map')texture.colorSpace=T.SRGBColorSpace;
-          textures.push(texture);facades.forEach(m=>{m[slot]=texture;m.needsUpdate=true;});
-        },undefined,()=>setNotice('Building texture could not load. Reload to retry.'));
-      }
-      box(scene, asphalt, 0,-.25,0,245,.5,245);
+      const earth=mat('#526343');
+      box(scene,earth,0,-.2,0,250,.4,250);
       const obstacles: { x: number; z: number; w: number; d: number }[] = [];
       const walls:InstanceType<typeof T.Mesh>[]=[];
-      const sand=mat('#bd9e70');box(scene,sand,0,.03,-98,245,.06,49);
-      // A fictional Kuwait-inspired desert boundary, not surveyed real geography.
-      for(let i=0;i<22;i++){const dune=new T.Mesh(sphereGeo,sand);dune.position.set(-116+rand()*232,-.8,-96-rand()*22);dune.scale.set(7+rand()*8,1.4+rand(),4+rand()*5);dune.receiveShadow=true;scene.add(dune);}
-      for (const x of [-84,-42,0,42,84]) {
-        for(let z=-112;z<116;z+=8) { box(scene,white,x,.016,z,.12,.02,3); box(scene,white,z,.016,x,3,.02,.12); }
+      const trail=mat('#8a7758');
+      for(const x of [-42,0,42,84])box(scene,trail,x,.012,0,7,.025,240);
+      for(const z of [-84,-42,0,42,84])box(scene,trail,0,.014,z,240,.03,6);
+      const trunkGeo=new T.CylinderGeometry(.18,.35,1,7),leafGeo=new T.IcosahedronGeometry(1,1);
+      geometries.add(trunkGeo);geometries.add(leafGeo);
+      const trunks=new T.InstancedMesh(trunkGeo,mat('#66513b'),220),leaves=new T.InstancedMesh(leafGeo,green,440);
+      const pose=new T.Object3D();
+      for(let i=0;i<220;i++){
+        let tx=0,tz=0;
+        do{tx=rand()*226-113;tz=rand()*226-113;}while([-42,0,42,84].some(v=>Math.abs(tx-v)<7)||[-84,-42,0,42,84].some(v=>Math.abs(tz-v)<7));
+        const height=5+rand()*5;pose.position.set(tx,height/2,tz);pose.scale.set(1,height,1);pose.updateMatrix();trunks.setMatrixAt(i,pose.matrix);
+        for(let j=0;j<2;j++){pose.position.set(tx+(j?.9:0),height+j*1.1,tz);pose.scale.set(2.3-j*.5,2.8-j*.6,2.3-j*.5);pose.rotation.y=rand()*6;pose.updateMatrix();leaves.setMatrixAt(i*2+j,pose.matrix);}
+        obstacles.push({x:tx,z:tz,w:.3,d:.3});
       }
-      for (const x of [-105,-63,-21,21,63,105]) for (const z of [-105,-63,-21,21,63,105]) {
-        if(z===-105)continue;
-        box(scene,concrete,x,.13,z,28,.26,28);
-        const height = 7+rand()*26, w = 15+rand()*5, d = 15+rand()*5;
-        walls.push(box(scene,facades[Math.floor(rand()*4)],x,height/2+.25,z,w,height,d));
-        // Separate recessed glass windows: repeat by floor, not a stretched facade image.
-        const columns=4, floors=Math.max(1,Math.floor((height-3)/3));
-        const windows=new T.InstancedMesh(boxGeo,glass,columns*floors*4);
-        const transform=new T.Object3D();let windowIndex=0;
-        for(let floor=0;floor<floors;floor++)for(let column=0;column<columns;column++)for(let side=0;side<4;side++){
-          const horizontal=(column+.5)/columns-.5,wy=4+floor*3;
-          transform.position.set(side<2?x+horizontal*w:x+(side===2?-1:1)*(w/2+.03),wy,side<2?z+(side===0?-1:1)*(d/2+.03):z+horizontal*d);
-          transform.scale.set(side<2?2.1:.08,1.8,side<2?.08:2.1);transform.updateMatrix();windows.setMatrixAt(windowIndex++,transform.matrix);
-        }
-        windows.receiveShadow=true;windows.computeBoundingSphere();scene.add(windows);
-        box(scene,dark,x,height+.4,z,w+.5,.5,d+.5);
-        box(scene,concrete,x+2,height+1,z,3,1.5,3);
-        obstacles.push({x,z,w:w/2+.5,d:d/2+.5});
-        box(scene,glass,x,.25+1.3,z+d/2+.03,3,2.6,.12);
-        for (const offset of [-12,12]) {
-          box(scene,dark,x+offset,2.5,z+12,.12,5,.12);
-          box(scene,white,x+offset,5,z+12,1.4,.15,.6);
-          box(scene,green,x+offset,.65,z-11,1.8,1.2,2.4);
-        }
+      trunks.castShadow=leaves.castShadow=true;trunks.computeBoundingSphere();leaves.computeBoundingSphere();scene.add(trunks,leaves);
+      for(let i=0;i<25;i++){const rx=rand()*200-100,rz=rand()*200-100;if(Math.abs(rx)<9||Math.abs(rz)<9)continue;
+        const rock=new T.Mesh(leafGeo,concrete);rock.position.set(rx,.7,rz);rock.scale.set(1.6,1.3,1.2);rock.rotation.y=rand()*6;scene.add(rock);walls.push(rock);obstacles.push({x:rx,z:rz,w:1.5,d:1.3});}
+      for(const [cx,cz] of [[-22,22],[65,-22],[-65,-65]]){
+        walls.push(box(scene,mat('#675442'),cx,1.7,cz,6,3.4,5));box(scene,dark,cx,3.5,cz,7,.3,6);box(scene,glass,cx,1.7,cz+2.52,2,1.2,.05);obstacles.push({x:cx,z:cz,w:3.1,d:2.6});
       }
-      const water = mat('#356575', .4, .25); box(scene,water,0,-.35,150,330,.1,50);
-      box(scene,concrete,0,.1,124,245,.3,4);
-      for(let x=-120;x<=120;x+=5) { box(scene,chrome,x,1,125,.08,2,.08); }
-      box(scene,chrome,0,1.7,125,245,.08,.08);
       const vehicleMaterials = ['#8c2829','#d2d1c5','#213d50','#434b45','#b28b45'].map(c=>mat(c,.55,.3));
       function car(index: number, bike = false) {
         const g = new T.Group(); const paint = vehicleMaterials[index%vehicleMaterials.length];
@@ -203,20 +158,16 @@ export default function CityGame() {
         for (const x of bike?[0]:[-.94,.94]) for (const z of bike?[-.85,.85]:[-1.25,1.25]) {
           const wheel = new T.Mesh(wheelGeo,rubber); wheel.rotation.z=Math.PI/2; wheel.position.set(x,.38,z); g.add(wheel); wheels.push(wheel);
         }
-        if (!bike) {
-          const low = new T.Group(); while (g.children.length) low.add(g.children[0]);
-          const lod = new T.LOD(); const detailed = detailedCar.clone(true); detailed.traverse(node=>{if(/^Wheel(Front|Rear)[LR]$/.test(node.name))wheels.push(node);}); lod.addLevel(detailed,0); lod.addLevel(low,32);
-          carLods.push(lod); g.add(lod);
-        }
         scene.add(g); return { group:g,wheels,bike };
       }
-      const parked = Array.from({length:18},(_,i)=>{
+      const parked = Array.from({length:4},(_,i)=>{
         const v=car(i,i===1||i===6||i===12); v.group.position.set(i<3?6:(i%2?48:-48),0,i<3?8+i*7:-65+(i%9)*18); return v;
       });
       function person(color: string) {
         void color; // Existing gameplay callers retain their interface.
-        const g = normalizeModel(cloneSkeleton(humanAsset.scene), 'height', 1.8);
-        const mixer = new T.AnimationMixer(g);
+        const g = new T.Group();
+        const visual=cloneSkeleton(humanAsset.scene);visual.scale.setScalar(1.15);g.add(visual);
+        const mixer = new T.AnimationMixer(visual);
         const walk = humanAsset.animations[0] ? mixer.clipAction(humanAsset.animations[0]).play() : null;
         mixer.update(0); mixers.push(mixer); scene.add(g);
         return { group:g, limbs: [] as InstanceType<typeof T.Mesh>[], mixer, walk };
@@ -224,7 +175,7 @@ export default function CityGame() {
       const player=person('#d0b894');
       const gun=new T.Group();player.group.add(gun);gun.position.set(.3,1.32,.3);
       box(gun,dark,0,0,.18,.12,.13,.48);box(gun,chrome,0,.025,.24,.11,.09,.36);box(gun,dark,0,-.14,0,.1,.22,.13);
-      const npcs=Array.from({length:32},(_,i)=>({ ...person(['#52606b','#857564','#5b4543','#d6d0bd'][i%4]), baseX: [-75,-33,9,51,93][i%5], phase:i*7, health:100,downUntil:0 }));
+      const npcs=Array.from({length:6},(_,i)=>({ ...person(['#52606b','#857564','#5b4543','#d6d0bd'][i%4]), baseX: [-75,-33,9,51,93][i%5], phase:i*7, health:100,downUntil:0 }));
       function animal(kind:'camel'|'dog'|'cat',px:number,pz:number){
         const g=new T.Group(),camel=kind==='camel',cat=kind==='cat';const fur=mat(camel?'#a88457':cat?'#b6aba0':'#766453');
         const length=camel?2.3:cat?.65:1.05,height=camel?1.8:cat?.35:.6;
@@ -237,8 +188,8 @@ export default function CityGame() {
         const tail=part(0,height,-length*.6,.045,cat?.3:.2,.045);tail.rotation.x=-.8;
         g.position.set(px,0,pz);scene.add(g);return {group:g,legs,px,pz,camel};
       }
-      const animals=[...Array.from({length:5},(_,i)=>animal('camel',64+i*7,-100)),...Array.from({length:8},(_,i)=>animal(i%2?'dog':'cat',9+(i%3)*42,-45+i*17))];
-      const traffic=Array.from({length:8},(_,i)=>({ ...car(i), lane:[-80,-38,4,46][i%4], offset:i*27 }));
+      const animals=Array.from({length:3},(_,i)=>animal('dog',14+i*28,-36+i*20));
+      const traffic=Array.from({length:0},(_,i)=>({ ...car(i), lane:[-80,-38,4,46][i%4], offset:i*27 }));
       const remotePlayers = new Map<string,{ human:ReturnType<typeof person>; car:ReturnType<typeof car>; bike:ReturnType<typeof car>; label:InstanceType<typeof T.Sprite>; username:string }>();
       const remoteLabel = (username:string) => {
         const c=document.createElement('canvas');c.width=512;c.height=96;const ctx=c.getContext('2d')!;
@@ -257,8 +208,13 @@ export default function CityGame() {
       const trace=new T.Line(traceGeo,traceMat);trace.visible=false;scene.add(trace);
       function blocked(nx:number,nz:number,r=0.5) {return Math.abs(nx)>119||Math.abs(nz)>120||obstacles.some(o=>Math.abs(nx-o.x)<o.w+r&&Math.abs(nz-o.z)<o.d+r);}
       const clear=()=>keys.current.clear();
+      let hp=100,lastDamage=-5;
+      const loot=[{x:3,z:7,kind:'weapon'},{x:42,z:35,kind:'medical'},{x:-42,z:-42,kind:'medical'}].map(p=>({...p,mesh:box(scene,mat(p.kind==='weapon'?'#b5984c':'#ab534f'),p.x,.45,p.z,.8,.9,.8),used:false}));
       action.current=(name)=>{
+        if(name==='respawn'){hp=100;setHealth(100);x=3;z=3;active=-1;speed=0;lastDamage=elapsed;pause(false);return;}
+
         if(pausedRef.current)return;
+        if(name.startsWith('look:')){yaw-=Number(name.slice(5))*.006;return;}
         if(name==='vehicle') {
           if(active>=0) {
             const ex=x+Math.cos(yaw)*2.7,ez=z-Math.sin(yaw)*2.7;
@@ -311,15 +267,16 @@ export default function CityGame() {
       renderer.domElement.addEventListener('webglcontextlost',lost);
       const resize=()=>{renderer.setSize(container.clientWidth,container.clientHeight);camera.aspect=container.clientWidth/Math.max(1,container.clientHeight);camera.updateProjectionMatrix();};
       const observer=new ResizeObserver(resize);observer.observe(container);resize();
-      let currentQuality='balanced',pixelRatio=Math.min(devicePixelRatio,1.25);
+      let currentQuality='balanced',pixelRatio=Math.min(devicePixelRatio,1);
       const desired=new T.Vector3();
       const tick=(now:number)=>{
         frame=requestAnimationFrame(tick);const dt=Math.min((now-last)/1000,.04);last=now;
         if(document.hidden||pausedRef.current)return;
+        if(hp<=0){pause(true);return;}
         elapsed+=dt;frames++;
         gun.visible=saveRef.current.owns&&active<0;
         if(reloadUntil&&elapsed>=reloadUntil){const amount=Math.min(12-saveRef.current.ammo,saveRef.current.reserve);persist({...saveRef.current,ammo:saveRef.current.ammo+amount,reserve:saveRef.current.reserve-amount});reloadUntil=0;setNotice('Reloaded.');}
-        if(currentQuality!==qualityRef.current){currentQuality=qualityRef.current;pixelRatio=Math.min(devicePixelRatio,currentQuality==='low'?1:currentQuality==='high'?2:1.25);renderer.setPixelRatio(pixelRatio);renderer.shadowMap.enabled=currentQuality!=='low';resize();}
+        if(currentQuality!==qualityRef.current){currentQuality=qualityRef.current;pixelRatio=Math.min(devicePixelRatio,currentQuality==='low'?.8:currentQuality==='high'?1.25:1);renderer.setPixelRatio(pixelRatio);renderer.shadowMap.enabled=currentQuality==='high';resize();}
         const k=keys.current,forward=Number(k.has('w')||k.has('arrowup'))-Number(k.has('s')||k.has('arrowdown'));
         const steering=Number(k.has('a')||k.has('arrowleft'))-Number(k.has('d')||k.has('arrowright'));
         const driving=active>=0, max=driving?(parked[active].bike?20:24):(k.has('shift')?6:3.4);
@@ -332,12 +289,14 @@ export default function CityGame() {
         player.limbs.forEach((l,i)=>l.rotation.x=driving?0:Math.sin(elapsed*10+i%2*Math.PI)*Math.min(.45,Math.abs(speed)*.12));
         if(driving){const v=parked[active];v.group.position.set(x,0,z);v.group.rotation.y=yaw;v.wheels.forEach(w=>w.rotation.x+=speed*dt*2);}
         npcs.forEach((p,i)=>{if(p.group.visible)p.mixer.update(dt);if(p.health<=0&&elapsed>=p.downUntil)p.health=100;p.group.visible=p.health>0;const t=(elapsed*1.2+p.phase)%165-70;p.group.position.set(p.baseX,0,t);p.limbs.forEach((l,j)=>l.rotation.x=Math.sin(elapsed*6+j%2*Math.PI+i)*.4);});
+        for(const drop of loot)if(!drop.used&&Math.hypot(x-drop.x,z-drop.z)<2.5){drop.used=true;drop.mesh.visible=false;if(drop.kind==='weapon'){persist({...saveRef.current,owns:true,ammo:12,reserve:60});setNotice('Rifle collected. Drag the scene to aim; F / Fire to shoot.');}else{hp=Math.min(100,hp+45);setHealth(hp);setNotice('Medical supplies collected.');}}
+        if(active<0&&elapsed-lastDamage>2&&npcs.some(p=>p.health>0&&p.group.position.distanceTo(player.group.position)<4)){hp=Math.max(0,hp-10);lastDamage=elapsed;setHealth(hp);setNotice('Hostile patrol nearby! Move away or defend yourself.');if(!hp)pause(true);}
         animals.forEach((a,i)=>{a.group.position.z=a.pz+Math.sin(elapsed*.1+i)*2;a.group.rotation.y=Math.cos(elapsed*.1+i)>0?0:Math.PI;a.legs.forEach((leg,j)=>leg.rotation.x=Math.sin(elapsed*3+j*Math.PI/2)*.16);});
         traffic.forEach((v,i)=>{const tz=(elapsed*(6+i%3)+v.offset)%230-115;v.group.position.set(v.lane,0,tz);v.wheels.forEach(w=>w.rotation.x+=dt*12);});
         networkPosition.current={x,z,yaw,vehicle:driving?(parked[active].bike?'Motorcycle':'Sedan'):''};
         for(const [id,remote] of remotePlayers){
           remote.human.group.visible=remote.car.group.visible=remote.bike.group.visible=remote.label.visible=false;
-          if(!peerStates.current.some(p=>p.id===id)){scene.remove(remote.human.group,remote.car.group,remote.bike.group,remote.label);remote.label.material.map?.dispose();remote.label.material.dispose();remotePlayers.delete(id); const mixerIndex=mixers.indexOf(remote.human.mixer);if(mixerIndex>=0)mixers.splice(mixerIndex,1);remote.human.mixer.stopAllAction();remote.car.group.traverse(object=>{if(object instanceof T.LOD){const i=carLods.indexOf(object);if(i>=0)carLods.splice(i,1);}});}
+          if(!peerStates.current.some(p=>p.id===id)){scene.remove(remote.human.group,remote.car.group,remote.bike.group,remote.label);remote.label.material.map?.dispose();remote.label.material.dispose();remotePlayers.delete(id); const mixerIndex=mixers.indexOf(remote.human.mixer);if(mixerIndex>=0)mixers.splice(mixerIndex,1);remote.human.mixer.stopAllAction();}
         }
         for(const p of peerStates.current){
           let remote=remotePlayers.get(p.id);
@@ -357,10 +316,7 @@ export default function CityGame() {
         camera.position.lerp(desired,1-Math.exp(-dt*5));camera.lookAt(x,1.3,z);
         sun.position.set(x-50,90,z+45);sun.target.position.set(x,0,z);
         if(now-report>200){setHud({x,z,yaw,speed:Math.round(Math.abs(speed)*3.6),vehicle:driving?(parked[active].bike?'Motorcycle':'Sedan'):'',distance:Math.round(distance),nearShop:Math.hypot(x-shop.x,z-shop.z)<9,fps:Math.round(frames*1000/Math.max(1,now-reportTime))});report=now;}
-        if(now-reportTime>2000){const fps=frames*1000/(now-reportTime);if(currentQuality!=='high'&&fps<27&&pixelRatio>1){pixelRatio=Math.max(1,pixelRatio-.1);renderer.setPixelRatio(pixelRatio);resize();}reportTime=now;frames=0;}
-        for (const lod of carLods) {
-          lod.levels[1].distance = currentQuality === 'low' ? 16 : currentQuality === 'high' ? 55 : 32;
-        }
+        if(now-reportTime>2000){const fps=frames*1000/(now-reportTime);if(currentQuality!=='high'&&fps<27&&pixelRatio>.7){pixelRatio=Math.max(.7,pixelRatio-.1);renderer.setPixelRatio(pixelRatio);resize();}reportTime=now;frames=0;}
         renderer.render(scene,camera);
       };
       camera.position.set(3,5,-5);frame=requestAnimationFrame(tick);setReady(true);
@@ -370,28 +326,32 @@ export default function CityGame() {
   },[started,peerStates]);
   const hold=(key:string,label:string)=><button aria-label={label} onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);keys.current.add(key);}} onPointerUp={()=>keys.current.delete(key)} onPointerCancel={()=>keys.current.delete(key)} onLostPointerCapture={()=>keys.current.delete(key)}>{label}</button>;
   const mission=missions[save.mission];
-  return <main ref={root} className={styles.shell}>
+  return <main ref={root} className={styles.shell}
+    onPointerDown={e=>{if(e.target instanceof HTMLCanvasElement){aim.current={id:e.pointerId,x:e.clientX};e.currentTarget.setPointerCapture(e.pointerId);}}}
+    onPointerMove={e=>{if(aim.current?.id===e.pointerId){action.current(`look:${e.clientX-aim.current.x}`);aim.current.x=e.clientX;}}}
+    onPointerUp={()=>{aim.current=null;}} onPointerCancel={()=>{aim.current=null;}}>
     <div ref={host} className={styles.world}/>
-    <header className={styles.header}><Link href="/">← ZION</Link><span>ZION STORY <small>GULF DISTRICT</small></span><div><button onClick={()=>{setLobbyOpen(!lobbyOpen);pause(!lobbyOpen);}}>Friends {online.count||''}</button><button onClick={fullscreen}>Fullscreen</button>{started&&<button onClick={()=>pause(!paused)}>{paused?'Resume':'Pause'}</button>}</div></header>
-    {!started?<section className={styles.intro}><small>AN ORIGINAL CITY ADVENTURE</small><h1>Your next<br/><em>shift starts here.</em></h1><p>Explore a Kuwait-inspired city and desert. Drive, deliver and discover.<br/>Earn game money, buy a gun and complete nine missions.</p><button onClick={()=>{setStarted(true);pause(false);}}>Enter Gulf District →</button><p className={styles.disclaimer}>Fictional Kuwait-inspired map • Detailed concept car and animated sample character; environment and animals remain prototypes.<br/>Progress saves on this browser. No real-money purchases. <a href="/game-assets/credits.txt" target="_blank" rel="noreferrer">Asset credits</a></p></section>:<>
+    <header className={styles.header}><Link href="/">← ZION</Link><span>ZION STORY <small>FOREST OUTPOST</small></span><div><button onClick={()=>{setLobbyOpen(!lobbyOpen);pause(!lobbyOpen);}}>Friends {online.count||''}</button><button onClick={fullscreen}>Fullscreen</button>{started&&<button onClick={()=>pause(!paused)}>{paused?'Resume':'Pause'}</button>}</div></header>
+    {!started?<section className={styles.intro}><small>AN ORIGINAL CITY ADVENTURE</small><h1>Your next<br/><em>shift starts here.</em></h1><p>Explore a forest trails and outposts. Drive, deliver and discover.<br/>Collect the rifle crate near spawn, explore and complete nine missions. Avoid hostile patrols.</p><button onClick={()=>{setStarted(true);pause(false);}}>Enter Forest Outpost →</button><p className={styles.disclaimer}>Original forest arena • Lightweight prototype environment and animated sample character.<br/>Progress saves on this browser. No real-money purchases. <a href="/game-assets/credits.txt" target="_blank" rel="noreferrer">Asset credits</a></p></section>:<>
+      <div className={styles.crosshair} aria-hidden="true">+</div>
       <section className={styles.quest}><small>CONTRACT {Math.min(save.mission+1,missions.length)} / {missions.length}</small><h1>{mission?.name||'Shift complete'}</h1><p>{mission?.brief||'All deliveries completed. Explore or practise at the range.'}</p>{mission&&<strong>{hud.distance} m <span>· ${mission.reward} reward</span></strong>}</section>
-      <aside className={styles.wallet}><b>${save.cash.toLocaleString()}</b><small>GAME MONEY</small>{save.owns&&<span>Ammo {save.ammo} / {save.reserve}</span>}<span>{hud.vehicle||'On foot'} · {hud.speed} km/h</span></aside>
-      <button className={styles.mapButton} onClick={()=>setMapOpen(!mapOpen)} aria-label="Toggle city map">{mapOpen?'Close map':'City map'}</button>
+      <aside className={styles.wallet}><b>${save.cash.toLocaleString()}</b><small>GAME MONEY</small><span>Health {health}/100</span>{save.owns&&<span>Ammo {save.ammo} / {save.reserve}</span>}<span>{hud.vehicle||'On foot'} · {hud.speed} km/h</span></aside>
+      <button className={styles.mapButton} onClick={()=>setMapOpen(!mapOpen)} aria-label="Toggle trail map">{mapOpen?'Close map':'Trail map'}</button>
       <div className={`${styles.map} ${mapOpen?styles.expanded:''}`}>
-        <svg viewBox="-125 -125 250 250" role="img" aria-label="City map: player arrow, gold mission, S range shop">
-          <rect x="-125" y="-125" width="250" height="250" fill="#232f33"/>
+        <svg viewBox="-125 -125 250 250" role="img" aria-label="Trail map: player arrow, gold mission, S range shop">
+          <rect x="-125" y="-125" width="250" height="250" fill="#2f4633"/>
           {[-84,-42,0,42,84].map(v=><g key={v} stroke="#657475" strokeWidth="9"><path d={`M ${v} -125 V 125`}/><path d={`M -125 ${v} H 125`}/></g>)}
-          <rect x="-125" y="-125" width="250" height="45" fill="#ac936a"/><text x="0" y="-108" fontSize="10" textAnchor="middle" fill="#302e28">DESERT TRAIL</text><text x="-35" y="60" fontSize="9" fill="#d7d1bc">GULF DISTRICT</text><path d="M -125 121 H 125" stroke="#427a8c" strokeWidth="8"/>
+          <rect x="-125" y="-125" width="250" height="45" fill="#465d3d"/><text x="0" y="-108" fontSize="10" textAnchor="middle" fill="#302e28">NORTH RIDGE</text><text x="-35" y="60" fontSize="9" fill="#d7d1bc">FOREST OUTPOST</text><path d="M -125 121 H 125" stroke="#465d3d" strokeWidth="8"/>
           <circle cx={shop.x} cy={shop.z} r="8" fill="#91c9b3"/><text x={shop.x} y={shop.z+4} fontSize="11" textAnchor="middle" fill="#122322">S</text>
           {mission&&<circle cx={mission.x} cy={mission.z} r="5" fill="#efc489"/>}
           <path d="M 0 7 L -4 -4 L 0 -2 L 4 -4 Z" fill="white" transform={`translate(${hud.x} ${hud.z}) rotate(${-hud.yaw*180/Math.PI})`}/>
         </svg><small>YOU △ · MISSION ● · SHOP S</small>
       </div>
-      <p className={styles.notice} role="status">{notice||'E: enter vehicle · WASD: move · Space: brake · B: shop · F: fire · R: reload'}</p>
+      <p className={styles.notice} role="status">{notice||'Drag: aim · WASD/arrows: move · E: vehicle · F: fire · R: reload'}</p>
       <div className={styles.controls}><div className={styles.pad}>{hold('w','↑')}{hold('a','←')}{hold('s','↓')}{hold('d','→')}</div><div className={styles.actions}><button onClick={()=>action.current('vehicle')}>{hud.vehicle?'Exit':'Enter vehicle'}</button>{hold(hud.vehicle?' ':'shift',hud.vehicle?'Brake':'Run')}<button onClick={()=>action.current('shop')}>{save.owns?'Ammo at S':'Gun $300'}</button>{save.owns&&<><button onClick={()=>action.current('fire')}>Fire</button><button onClick={()=>action.current('reload')}>Reload</button></>}</div></div>
       <footer className={styles.footer}><span>{online.status} · {save.hits} target hits</span><label>Graphics <select value={quality} onChange={e=>{qualityRef.current=e.target.value;setQuality(e.target.value);}}><option value="balanced">Balanced</option><option value="low">Performance</option><option value="high">High detail</option></select></label></footer>
-      {!ready&&!error&&<div className={styles.overlay}>Loading Gulf District models…</div>}
-      {paused&&!error&&<div className={styles.overlay}><h2>Take a breather.</h2><p>Your progress is saved on this browser.</p><button onClick={()=>pause(false)}>Continue</button><Link href="/">Back to ZION</Link></div>}
+      {!ready&&!error&&<div className={styles.overlay}>Loading Forest Outpost models…</div>}
+      {paused&&!error&&<div className={styles.overlay}><h2>{health?"Take a breather.":"You were downed"}</h2><p>Your progress is saved on this browser.</p><button onClick={()=>health?pause(false):action.current("respawn")}>{health?"Continue":"Respawn"}</button><Link href="/">Back to ZION</Link></div>}
       <div className={styles.rotate}>↻ Rotate your phone for a wider view</div>
     </>}
     {lobbyOpen&&<section className={styles.overlay}><h2>Explore with friends</h2><p>Up to 4 players · accepted friends of the host only.</p>{online.room?<><p>Room code: <strong>{online.room.code}</strong></p><button onClick={async()=>{try{await navigator.clipboard.writeText(online.room!.code);setNotice('Room code copied. Send it to your ZION friends.');}catch{setNotice('Select and copy the room code manually.');}}}>Copy room code</button><button onClick={online.leave}>Leave room</button></>:<><button disabled={online.busy} onClick={()=>online.join()}>Create private room</button><label>Friend’s room code <input value={roomCode} maxLength={16} onChange={e=>setRoomCode(e.target.value)} placeholder="16-character room code"/></label><button disabled={online.busy||roomCode.length!==16} onClick={()=>online.join(roomCode)}>Join room</button></>}<p role="status">{online.status}{online.count?` · ${online.count}/4 players`:''}</p><button onClick={()=>{setLobbyOpen(false);pause(false);}}>Back to game</button><small>First-time setup: run SUPABASE_V63_CITY.sql. Sign in through ZION first.</small></section>}

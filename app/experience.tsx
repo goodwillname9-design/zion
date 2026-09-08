@@ -64,6 +64,7 @@ export function Experience({
   onOpenFriends,
   onOpenNotifications,
   onOpenCommunities,
+  onOpenFeed,
   onOpenReels,
   onOpenProfile,
   onOpenFindFriends,
@@ -76,6 +77,7 @@ export function Experience({
   onOpenFriends?: () => void;
   onOpenNotifications?: () => void;
   onOpenCommunities?: () => void;
+  onOpenFeed?: () => void;
   onOpenReels?: () => void;
   onOpenProfile?: () => void;
   onOpenFindFriends?: () => void;
@@ -593,6 +595,7 @@ export function Experience({
             <Search size={16} />
             <b>Find Friends</b>
           </button>
+          <button className="friends-nav" type="button" onClick={onOpenFeed}><Globe2 size={16}/><b>Public feed</b></button>
           <button className="friends-nav" type="button" onClick={onOpenGames}>
             <Gamepad2 size={16} />
             <b>Games</b>

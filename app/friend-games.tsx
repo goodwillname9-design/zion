@@ -406,10 +406,10 @@ export function FriendGames({
         </div>
       </div>
       <Link href="/city" className="new-game-card" style={{ display: 'block', marginBottom: 20, padding: 24, textDecoration: 'none', color: 'inherit', background: 'linear-gradient(120deg, #1c302b, #171426)' }}>
-        <small>ZION STORY · GULF DISTRICT</small>
+        <small>ZION STORY · FOREST OUTPOST</small>
         <h2 style={{ fontSize: 26, margin: '10px 0' }}>Your next shift starts here →</h2>
-        <p>Kuwait-inspired city, desert trail, nine missions, gun shop and friend rooms.</p>
-        <small>Original procedural city · Online rooms require the V63 SQL update.</small>
+        <p>Forest trails, off-road driving, rifle loot, patrols and friend rooms.</p>
+        <small>Original forest prototype · Online exploration requires the V63 SQL update.</small>
       </Link>
       {pending.map((game) => (
         <div className="game-invite" key={game.id}>

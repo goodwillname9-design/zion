@@ -1,3 +1,4 @@
+import LightCord from "./light-cord";
 import type { Metadata } from "next";
 import "@fontsource-variable/montserrat";
 import "./globals.css";
@@ -32,6 +33,7 @@ export default function RootLayout({
     <html lang="en">
       <body className="antialiased">
         {children}
+        <LightCord />
         <LanguageSwitcher />
         <PwaInstall />
       </body>

@@ -1,5 +1,6 @@
 "use client";
 
+import PublicFeed from "./public-feed";
 import MessageTime from "./message-time";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -369,6 +370,7 @@ export function SocialShell() {
   >("friends");
   useEffect(()=>{if(!autoGameId)return;const t=window.setTimeout(()=>{setFriendsInitialTab("games");setFriendsOpen(true);},0);return()=>window.clearTimeout(t);},[autoGameId]);
   const [accountManagerOpen, setAccountManagerOpen] = useState(false);
+  const [feedOpen,setFeedOpen] = useState(false);
   const [reelsOpen, setReelsOpen] = useState(false);
   const [error, setError] = useState("");
   const [notificationPrompt, setNotificationPrompt] = useState(false);
@@ -741,6 +743,7 @@ export function SocialShell() {
           setFriendsInitialTab("communities");
           setFriendsOpen(true);
         }}
+        onOpenFeed={() => setFeedOpen(true)}
         onOpenReels={() => setReelsOpen(true)}
         onOpenProfile={() => {
           setFriendsInitialTab("profile");
@@ -777,6 +780,7 @@ export function SocialShell() {
           onClose={() => setAccountManagerOpen(false)}
         />
       ) : null}
+      {feedOpen && <PublicFeed user={user} onClose={()=>setFeedOpen(false)} />}
       {reelsOpen ? (
         <ZionReels user={user} onClose={() => setReelsOpen(false)} />
       ) : null}
@@ -1742,6 +1746,7 @@ function FriendsPanel({
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+  useEffect(()=>{const sync=()=>setTheme(document.documentElement.dataset.theme==="day"?"day":"dark");window.addEventListener("zion-theme-change",sync);return()=>window.removeEventListener("zion-theme-change",sync);},[]);
   const savePrivacy = async () => {
     if (!supabase) return;
     await supabase
