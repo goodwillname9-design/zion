@@ -6444,3 +6444,17 @@ html {
     padding-inline: 14px !important;
   }
 }
+
+/* V66: timestamps and receipts take their own row, never cover media controls. */
+.message-footer { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px 12px; margin-top:8px; }
+.message-meta { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:6px; margin-left:auto; font-size:11px; line-height:1.4; }
+.message-time { white-space:nowrap; font-variant-numeric:tabular-nums; opacity:.8; }
+.friend-bubble .message-meta small { position:static; letter-spacing:-2px; opacity:.85; }
+.friend-bubble .message-meta .edited-label { position:static; font-size:10px; }
+.friend-bubble .message-footer .message-actions { position:static; padding:0; background:none; backdrop-filter:none; }
+.friend-bubble { padding-bottom:10px; }
+.friend-bubble.has-media .message-footer { padding:8px 10px; margin-top:0; color:#e4e4ed; }
+.friend-bubble.has-media > span:not(.deleted-message) { padding-bottom:8px; }
+.community-bubble .message-meta { margin-top:6px; }
+.answer-bubble .message-meta { margin-top:5px; }
+.answer-bubble .message-meta .message-receipt { position:static; margin:0; }

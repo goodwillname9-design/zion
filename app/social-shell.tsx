@@ -1,5 +1,7 @@
 "use client";
 
+import MessageTime from "./message-time";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -2876,6 +2878,7 @@ function CommunityPanel({
                 />
               ) : null}
               <span>{item.display_message}</span>
+              <div className="message-meta"><MessageTime sentAt={item.created_at} /></div>
             </div>
           ))}
           {!messages.length ? (
@@ -4229,6 +4232,7 @@ function FriendChat({
                 ) : item.display_message ? (
                   <span>{item.display_message}</span>
                 ) : null}
+                <div className="message-footer">
                 {!item.deleted_at ? (
                   <div className="message-actions">
                     <button
@@ -4255,14 +4259,18 @@ function FriendChat({
                     ) : null}
                   </div>
                 ) : null}
+                <div className="message-meta">
+                <MessageTime sentAt={item.created_at} />
                 {item.edited_at && !item.deleted_at ? (
                   <em className="edited-label">edited</em>
                 ) : null}
                 {item.sender_id === user.id ? (
-                  <small className={item.read_at ? "read" : ""}>
+                  <small className={item.read_at ? "read" : ""} aria-label={item.read_at ? "Seen" : "Sent"}>
                     {item.read_at ? "✓✓" : "✓"}
                   </small>
                 ) : null}
+                </div>
+                </div>
               </div>
             );
           })}

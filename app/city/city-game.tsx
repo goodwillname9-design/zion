@@ -51,14 +51,37 @@ export default function CityGame() {
     let cleanup = () => {};
     void (async () => {
       const T = await import('three');
-      if (disposed || !host.current) return;
+      const [{ GLTFLoader }, { clone: cloneSkeleton }, { RoomEnvironment }] = await Promise.all([
+        import('three/addons/loaders/GLTFLoader.js'),
+        import('three/addons/utils/SkeletonUtils.js'),
+        import('three/addons/environments/RoomEnvironment.js'),
+      ]);
+      const loader = new GLTFLoader();
+      const [carAsset, humanAsset] = await Promise.all([
+        loader.loadAsync('/game-assets/car-concept.glb'),
+        loader.loadAsync('/game-assets/cesium-man.glb'),
+      ]);
+      const releaseAssets = () => {
+        const released = new Set<unknown>();
+        for(const asset of [carAsset,humanAsset])asset.scene.traverse(object=>{
+          if(!(object instanceof T.Mesh))return;
+          if(!released.has(object.geometry)){object.geometry.dispose();released.add(object.geometry);}
+          for(const material of Array.isArray(object.material)?object.material:[object.material])if(!released.has(material)){
+            for(const value of Object.values(material))if(value instanceof T.Texture&&!released.has(value)){value.dispose();released.add(value);}
+            material.dispose();released.add(material);
+          }
+        });
+      };
+      if (disposed || !host.current) { releaseAssets(); return; }
+      cleanup=releaseAssets;
       const container = host.current;
       const scene = new T.Scene(); scene.background = new T.Color('#a6b9c1'); scene.fog = new T.Fog('#a6b9c1', 90, 240);
-      const renderer = new T.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+      const renderer = new T.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
       renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
       renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
       renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
       container.appendChild(renderer.domElement);
+      cleanup=()=>{releaseAssets();renderer.dispose();renderer.domElement.remove();};
       const camera = new T.PerspectiveCamera(58, 1, .1, 280);
       scene.add(new T.HemisphereLight('#c2d8ef', '#5b544b', 2.5));
       const sun = new T.DirectionalLight('#ffe0af', 3); sun.position.set(-50, 90, 45); sun.castShadow = true;
@@ -67,29 +90,62 @@ export default function CityGame() {
       const geometries = new Set<InstanceType<typeof T.BufferGeometry>>();
       const materials = new Set<InstanceType<typeof T.Material>>();
       const textures: InstanceType<typeof T.Texture>[] = [];
+      for (const asset of [carAsset, humanAsset]) asset.scene.traverse(object => {
+        if (!(object instanceof T.Mesh)) return;
+        geometries.add(object.geometry);
+        for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+          materials.add(material);
+          for (const value of Object.values(material)) if (value instanceof T.Texture && !textures.includes(value)) textures.push(value);
+        }
+        object.castShadow = object.receiveShadow = true;
+      });
+      const pmrem = new T.PMREMGenerator(renderer);
+      const roomEnvironment = new RoomEnvironment();
+      const environment = pmrem.fromScene(roomEnvironment, .04);
+      scene.environment = environment.texture;
+      roomEnvironment.dispose(); pmrem.dispose();
+      // Normalize once; clones share GPU resources. Distance LOD bounds car cost.
+      function normalizeModel(model: InstanceType<typeof T.Object3D>, dimension: 'height'|'length', size: number) {
+        const bounds = new T.Box3().setFromObject(model), extent = bounds.getSize(new T.Vector3());
+        const scale = size / (dimension === 'height' ? extent.y : Math.max(extent.x, extent.z));
+        const wrapper = new T.Group(); wrapper.add(model); wrapper.scale.setScalar(scale);
+        const center = bounds.getCenter(new T.Vector3()); model.position.sub(new T.Vector3(center.x, bounds.min.y, center.z));
+        return wrapper;
+      }
+      const detailedCar = normalizeModel(carAsset.scene, 'length', 4.2);
+      const carLods: InstanceType<typeof T.LOD>[] = [];
+      const mixers: InstanceType<typeof T.AnimationMixer>[] = [];
       const boxGeo = new T.BoxGeometry(1, 1, 1); geometries.add(boxGeo);
       const sphereGeo = new T.SphereGeometry(1, 12, 8); geometries.add(sphereGeo);
       const wheelGeo = new T.CylinderGeometry(.36, .36, .22, 14); geometries.add(wheelGeo);
       const mat = (color: string, metalness = 0, roughness = .8) => { const m = new T.MeshStandardMaterial({ color, metalness, roughness }); materials.add(m); return m; };
       const asphalt = mat('#484b4c'), concrete = mat('#a3a29a'), white = mat('#dedacb'), dark = mat('#182128'), rubber = mat('#151719'), chrome = mat('#a5acb0', .8, .2);
-      const glass = mat('#385160', .65, .15), skin = mat('#b99073'), green = mat('#4c6147');
+      const textureLoader = new T.TextureLoader();
+      for (const [slot, file] of [['map','diffuse'],['normalMap','nor_gl'],['roughnessMap','rough']] as const) {
+        textureLoader.load(`/game-assets/asphalt-${file}.jpg`, texture => {
+          if (disposed) { texture.dispose(); return; }
+          texture.wrapS = texture.wrapT = T.RepeatWrapping; texture.repeat.set(65,65);
+          texture.anisotropy = Math.min(8,renderer.capabilities.getMaxAnisotropy());
+          if (slot === 'map') texture.colorSpace = T.SRGBColorSpace;
+          textures.push(texture); asphalt[slot] = texture; asphalt.color.set('#ffffff'); asphalt.needsUpdate = true;
+        }, undefined, () => setNotice('Road texture could not load. Reload to retry.'));
+      }
+      const glass = mat('#385160', .65, .15), green = mat('#4c6147');
       const box = (parent: InstanceType<typeof T.Object3D>, m: InstanceType<typeof T.Material>, x: number, y: number, z: number, w: number, h: number, d: number) => {
         const o = new T.Mesh(boxGeo, m); o.position.set(x,y,z); o.scale.set(w,h,d); o.castShadow = o.receiveShadow = true; parent.add(o); return o;
       };
       let seed = 635;
       const rand = () => { seed = (1664525 * seed + 1013904223) >>> 0; return seed / 4294967296; };
-      // Generated facade texture: no downloads, copyrighted game assets or runtime asset requests.
-      function facade(base: string) {
-        const c = document.createElement('canvas'); c.width = c.height = 256;
-        const ctx = c.getContext('2d')!; ctx.fillStyle = base; ctx.fillRect(0,0,256,256);
-        for (let y=0;y<256;y+=32) for (let x=0;x<256;x+=32) {
-          ctx.fillStyle = rand() > .75 ? '#a29b77' : '#31434b'; ctx.fillRect(x+7,y+5,18,22);
-          ctx.fillStyle = '#697779'; ctx.fillRect(x+8,y+6,1,20); ctx.fillRect(x+7,y+26,20,2);
-        }
-        const t = new T.CanvasTexture(c); t.colorSpace = T.SRGBColorSpace; textures.push(t);
-        const m = new T.MeshStandardMaterial({ map: t, roughness: .8 }); materials.add(m); return m;
+      const facades = ['#d7c8ac','#bdb5a4','#a3b5bd','#cabba7'].map(c=>mat(c,0,.85));
+      for (const [slot,file] of [['map','diffuse'],['normalMap','nor_gl'],['roughnessMap','rough']] as const) {
+        textureLoader.load(`/game-assets/concrete-${file}.jpg`, texture=>{
+          if(disposed){texture.dispose();return;}
+          texture.wrapS=texture.wrapT=T.RepeatWrapping;texture.repeat.set(5,5);
+          texture.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());
+          if(slot==='map')texture.colorSpace=T.SRGBColorSpace;
+          textures.push(texture);facades.forEach(m=>{m[slot]=texture;m.needsUpdate=true;});
+        },undefined,()=>setNotice('Building texture could not load. Reload to retry.'));
       }
-      const facades = ['#827b6f','#b0a58f','#737f83','#8a857b'].map(facade);
       box(scene, asphalt, 0,-.25,0,245,.5,245);
       const obstacles: { x: number; z: number; w: number; d: number }[] = [];
       const walls:InstanceType<typeof T.Mesh>[]=[];
@@ -104,6 +160,16 @@ export default function CityGame() {
         box(scene,concrete,x,.13,z,28,.26,28);
         const height = 7+rand()*26, w = 15+rand()*5, d = 15+rand()*5;
         walls.push(box(scene,facades[Math.floor(rand()*4)],x,height/2+.25,z,w,height,d));
+        // Separate recessed glass windows: repeat by floor, not a stretched facade image.
+        const columns=4, floors=Math.max(1,Math.floor((height-3)/3));
+        const windows=new T.InstancedMesh(boxGeo,glass,columns*floors*4);
+        const transform=new T.Object3D();let windowIndex=0;
+        for(let floor=0;floor<floors;floor++)for(let column=0;column<columns;column++)for(let side=0;side<4;side++){
+          const horizontal=(column+.5)/columns-.5,wy=4+floor*3;
+          transform.position.set(side<2?x+horizontal*w:x+(side===2?-1:1)*(w/2+.03),wy,side<2?z+(side===0?-1:1)*(d/2+.03):z+horizontal*d);
+          transform.scale.set(side<2?2.1:.08,1.8,side<2?.08:2.1);transform.updateMatrix();windows.setMatrixAt(windowIndex++,transform.matrix);
+        }
+        windows.receiveShadow=true;windows.computeBoundingSphere();scene.add(windows);
         box(scene,dark,x,height+.4,z,w+.5,.5,d+.5);
         box(scene,concrete,x+2,height+1,z,3,1.5,3);
         obstacles.push({x,z,w:w/2+.5,d:d/2+.5});
@@ -133,9 +199,14 @@ export default function CityGame() {
           for(let grille=-.4;grille<=.4;grille+=.13)box(g,dark,grille,.68,2.015,.055,.2,.025);
           for (const x of [-.6,.6]) { box(g,white,x,.85,2.025,.45,.2,.03); box(g,vehicleMaterials[0],x,.85,-2.025,.45,.2,.03); }
         }
-        const wheels: InstanceType<typeof T.Mesh>[] = [];
+        const wheels: InstanceType<typeof T.Object3D>[] = [];
         for (const x of bike?[0]:[-.94,.94]) for (const z of bike?[-.85,.85]:[-1.25,1.25]) {
           const wheel = new T.Mesh(wheelGeo,rubber); wheel.rotation.z=Math.PI/2; wheel.position.set(x,.38,z); g.add(wheel); wheels.push(wheel);
+        }
+        if (!bike) {
+          const low = new T.Group(); while (g.children.length) low.add(g.children[0]);
+          const lod = new T.LOD(); const detailed = detailedCar.clone(true); detailed.traverse(node=>{if(/^Wheel(Front|Rear)[LR]$/.test(node.name))wheels.push(node);}); lod.addLevel(detailed,0); lod.addLevel(low,32);
+          carLods.push(lod); g.add(lod);
         }
         scene.add(g); return { group:g,wheels,bike };
       }
@@ -143,12 +214,12 @@ export default function CityGame() {
         const v=car(i,i===1||i===6||i===12); v.group.position.set(i<3?6:(i%2?48:-48),0,i<3?8+i*7:-65+(i%9)*18); return v;
       });
       function person(color: string) {
-        const g=new T.Group(), clothes=mat(color); const limbs: InstanceType<typeof T.Mesh>[]=[];
-        box(g,clothes,0,1.15,0,.5,.65,.28);
-        const head=new T.Mesh(sphereGeo,skin);head.scale.set(.19,.23,.19);head.position.y=1.7;g.add(head);
-        for(const x of [-.16,.16]) limbs.push(box(g,dark,x,.45,0,.18,.8,.2));
-        for(const x of [-.34,.34]) limbs.push(box(g,clothes,x,1.03,0,.15,.65,.17));
-        scene.add(g);return {group:g,limbs};
+        void color; // Existing gameplay callers retain their interface.
+        const g = normalizeModel(cloneSkeleton(humanAsset.scene), 'height', 1.8);
+        const mixer = new T.AnimationMixer(g);
+        const walk = humanAsset.animations[0] ? mixer.clipAction(humanAsset.animations[0]).play() : null;
+        mixer.update(0); mixers.push(mixer); scene.add(g);
+        return { group:g, limbs: [] as InstanceType<typeof T.Mesh>[], mixer, walk };
       }
       const player=person('#d0b894');
       const gun=new T.Group();player.group.add(gun);gun.position.set(.3,1.32,.3);
@@ -224,7 +295,7 @@ export default function CityGame() {
           const attr=traceGeo.getAttribute('position');attr.setXYZ(0,origin.x,origin.y,origin.z);attr.setXYZ(1,end.x,end.y,end.z);attr.needsUpdate=true;traceGeo.computeBoundingSphere();
           trace.visible=true;shotUntil=elapsed+.12;
           if(hit&&targets.some(target=>target===hit.object)){persist({...saveRef.current,hits:saveRef.current.hits+1});setNotice('Range target hit!');}
-          else if(hit){const npc=npcs.find(p=>p.group.children.includes(hit.object));if(npc){npc.health-=50;if(npc.health<=0)npc.downUntil=elapsed+12;setNotice(npc.health>0?'NPC hit.':'NPC down — respawns shortly.');}else setNotice('Shot blocked by a building.');}
+          else if(hit){const npc=npcs.find(p=>(()=>{let object:InstanceType<typeof T.Object3D>|null=hit.object;while(object){if(object===p.group)return true;object=object.parent;}return false;})());if(npc){npc.health-=50;if(npc.health<=0)npc.downUntil=elapsed+12;setNotice(npc.health>0?'NPC hit.':'NPC down — respawns shortly.');}else setNotice('Shot blocked by a building.');}
           else setNotice('Miss. Turn to line up a target.');
         }
       };
@@ -248,7 +319,7 @@ export default function CityGame() {
         elapsed+=dt;frames++;
         gun.visible=saveRef.current.owns&&active<0;
         if(reloadUntil&&elapsed>=reloadUntil){const amount=Math.min(12-saveRef.current.ammo,saveRef.current.reserve);persist({...saveRef.current,ammo:saveRef.current.ammo+amount,reserve:saveRef.current.reserve-amount});reloadUntil=0;setNotice('Reloaded.');}
-        if(currentQuality!==qualityRef.current){currentQuality=qualityRef.current;pixelRatio=Math.min(devicePixelRatio,currentQuality==='low'?.8:1.25);renderer.setPixelRatio(pixelRatio);renderer.shadowMap.enabled=currentQuality!=='low';resize();}
+        if(currentQuality!==qualityRef.current){currentQuality=qualityRef.current;pixelRatio=Math.min(devicePixelRatio,currentQuality==='low'?1:currentQuality==='high'?2:1.25);renderer.setPixelRatio(pixelRatio);renderer.shadowMap.enabled=currentQuality!=='low';resize();}
         const k=keys.current,forward=Number(k.has('w')||k.has('arrowup'))-Number(k.has('s')||k.has('arrowdown'));
         const steering=Number(k.has('a')||k.has('arrowleft'))-Number(k.has('d')||k.has('arrowright'));
         const driving=active>=0, max=driving?(parked[active].bike?20:24):(k.has('shift')?6:3.4);
@@ -257,15 +328,16 @@ export default function CityGame() {
         const nx=x+Math.sin(yaw)*speed*dt,nz=z+Math.cos(yaw)*speed*dt;
         if(!blocked(nx,nz,driving?1.6:.5)){x=nx;z=nz;}else speed=0;
         player.group.position.set(x,driving?.3:0,z);player.group.rotation.y=yaw;player.group.visible=!driving||parked[active].bike;
+        player.mixer.update(dt * (driving ? 0 : Math.min(2,Math.abs(speed)/1.2)));
         player.limbs.forEach((l,i)=>l.rotation.x=driving?0:Math.sin(elapsed*10+i%2*Math.PI)*Math.min(.45,Math.abs(speed)*.12));
         if(driving){const v=parked[active];v.group.position.set(x,0,z);v.group.rotation.y=yaw;v.wheels.forEach(w=>w.rotation.x+=speed*dt*2);}
-        npcs.forEach((p,i)=>{if(p.health<=0&&elapsed>=p.downUntil)p.health=100;p.group.visible=p.health>0;const t=(elapsed*1.2+p.phase)%165-70;p.group.position.set(p.baseX,0,t);p.limbs.forEach((l,j)=>l.rotation.x=Math.sin(elapsed*6+j%2*Math.PI+i)*.4);});
+        npcs.forEach((p,i)=>{if(p.group.visible)p.mixer.update(dt);if(p.health<=0&&elapsed>=p.downUntil)p.health=100;p.group.visible=p.health>0;const t=(elapsed*1.2+p.phase)%165-70;p.group.position.set(p.baseX,0,t);p.limbs.forEach((l,j)=>l.rotation.x=Math.sin(elapsed*6+j%2*Math.PI+i)*.4);});
         animals.forEach((a,i)=>{a.group.position.z=a.pz+Math.sin(elapsed*.1+i)*2;a.group.rotation.y=Math.cos(elapsed*.1+i)>0?0:Math.PI;a.legs.forEach((leg,j)=>leg.rotation.x=Math.sin(elapsed*3+j*Math.PI/2)*.16);});
         traffic.forEach((v,i)=>{const tz=(elapsed*(6+i%3)+v.offset)%230-115;v.group.position.set(v.lane,0,tz);v.wheels.forEach(w=>w.rotation.x+=dt*12);});
         networkPosition.current={x,z,yaw,vehicle:driving?(parked[active].bike?'Motorcycle':'Sedan'):''};
         for(const [id,remote] of remotePlayers){
           remote.human.group.visible=remote.car.group.visible=remote.bike.group.visible=remote.label.visible=false;
-          if(!peerStates.current.some(p=>p.id===id)){scene.remove(remote.human.group,remote.car.group,remote.bike.group,remote.label);remote.label.material.map?.dispose();remote.label.material.dispose();remotePlayers.delete(id);}
+          if(!peerStates.current.some(p=>p.id===id)){scene.remove(remote.human.group,remote.car.group,remote.bike.group,remote.label);remote.label.material.map?.dispose();remote.label.material.dispose();remotePlayers.delete(id); const mixerIndex=mixers.indexOf(remote.human.mixer);if(mixerIndex>=0)mixers.splice(mixerIndex,1);remote.human.mixer.stopAllAction();remote.car.group.traverse(object=>{if(object instanceof T.LOD){const i=carLods.indexOf(object);if(i>=0)carLods.splice(i,1);}});}
         }
         for(const p of peerStates.current){
           let remote=remotePlayers.get(p.id);
@@ -274,6 +346,7 @@ export default function CityGame() {
           const object=p.vehicle==='Sedan'?remote.car.group:p.vehicle==='Motorcycle'?remote.bike.group:remote.human.group;
           object.visible=true;desired.set(p.x,0,p.z);object.position.lerp(desired,1-Math.exp(-dt*9));object.rotation.y=p.yaw;
           remote.label.visible=true;remote.label.position.copy(object.position);remote.label.position.y=3;
+          remote.human.mixer.update(dt);
           remote.human.limbs.forEach((l,i)=>l.rotation.x=Math.sin(elapsed*8+i%2*Math.PI)*.25);
         }
         const m=missions[saveRef.current.mission];marker.visible=!!m;
@@ -284,12 +357,15 @@ export default function CityGame() {
         camera.position.lerp(desired,1-Math.exp(-dt*5));camera.lookAt(x,1.3,z);
         sun.position.set(x-50,90,z+45);sun.target.position.set(x,0,z);
         if(now-report>200){setHud({x,z,yaw,speed:Math.round(Math.abs(speed)*3.6),vehicle:driving?(parked[active].bike?'Motorcycle':'Sedan'):'',distance:Math.round(distance),nearShop:Math.hypot(x-shop.x,z-shop.z)<9,fps:Math.round(frames*1000/Math.max(1,now-reportTime))});report=now;}
-        if(now-reportTime>2000){const fps=frames*1000/(now-reportTime);if(fps<27&&pixelRatio>.7){pixelRatio=Math.max(.65,pixelRatio-.15);renderer.setPixelRatio(pixelRatio);resize();}reportTime=now;frames=0;}
+        if(now-reportTime>2000){const fps=frames*1000/(now-reportTime);if(currentQuality!=='high'&&fps<27&&pixelRatio>1){pixelRatio=Math.max(1,pixelRatio-.1);renderer.setPixelRatio(pixelRatio);resize();}reportTime=now;frames=0;}
+        for (const lod of carLods) {
+          lod.levels[1].distance = currentQuality === 'low' ? 16 : currentQuality === 'high' ? 55 : 32;
+        }
         renderer.render(scene,camera);
       };
       camera.position.set(3,5,-5);frame=requestAnimationFrame(tick);setReady(true);
-      cleanup=()=>{cancelAnimationFrame(frame);observer.disconnect();clear();action.current=()=>{};window.removeEventListener('keydown',down);window.removeEventListener('keyup',up);window.removeEventListener('blur',hidden);document.removeEventListener('visibilitychange',hidden);renderer.domElement.removeEventListener('webglcontextlost',lost);geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());textures.forEach(t=>t.dispose());renderer.dispose();renderer.domElement.remove();};
-    })().catch(()=>setError('3D could not start. Enable graphics acceleration or try a WebGL-compatible browser.'));
+      cleanup=()=>{cancelAnimationFrame(frame);observer.disconnect();clear();action.current=()=>{};window.removeEventListener('keydown',down);window.removeEventListener('keyup',up);window.removeEventListener('blur',hidden);document.removeEventListener('visibilitychange',hidden);renderer.domElement.removeEventListener('webglcontextlost',lost);geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());textures.forEach(t=>t.dispose());mixers.forEach(m=>m.stopAllAction());environment.dispose();renderer.dispose();renderer.domElement.remove();};
+    })().catch(()=>{cleanup();if(!disposed)setError('Game assets or graphics could not load. Reload to retry. Check that /game-assets is included in your deployment.');});
     return()=>{disposed=true;cleanup();};
   },[started,peerStates]);
   const hold=(key:string,label:string)=><button aria-label={label} onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);keys.current.add(key);}} onPointerUp={()=>keys.current.delete(key)} onPointerCancel={()=>keys.current.delete(key)} onLostPointerCapture={()=>keys.current.delete(key)}>{label}</button>;
@@ -297,7 +373,7 @@ export default function CityGame() {
   return <main ref={root} className={styles.shell}>
     <div ref={host} className={styles.world}/>
     <header className={styles.header}><Link href="/">← ZION</Link><span>ZION STORY <small>GULF DISTRICT</small></span><div><button onClick={()=>{setLobbyOpen(!lobbyOpen);pause(!lobbyOpen);}}>Friends {online.count||''}</button><button onClick={fullscreen}>Fullscreen</button>{started&&<button onClick={()=>pause(!paused)}>{paused?'Resume':'Pause'}</button>}</div></header>
-    {!started?<section className={styles.intro}><small>AN ORIGINAL CITY ADVENTURE</small><h1>Your next<br/><em>shift starts here.</em></h1><p>Explore a Kuwait-inspired city and desert. Drive, deliver and discover.<br/>Earn game money, buy a gun and complete nine missions.</p><button onClick={()=>{setStarted(true);pause(false);}}>Enter Gulf District →</button><p className={styles.disclaimer}>Fictional Kuwait-inspired map • Procedural models, not photorealistic assets.<br/>Progress saves on this browser. No real-money purchases.</p></section>:<>
+    {!started?<section className={styles.intro}><small>AN ORIGINAL CITY ADVENTURE</small><h1>Your next<br/><em>shift starts here.</em></h1><p>Explore a Kuwait-inspired city and desert. Drive, deliver and discover.<br/>Earn game money, buy a gun and complete nine missions.</p><button onClick={()=>{setStarted(true);pause(false);}}>Enter Gulf District →</button><p className={styles.disclaimer}>Fictional Kuwait-inspired map • Detailed concept car and animated sample character; environment and animals remain prototypes.<br/>Progress saves on this browser. No real-money purchases. <a href="/game-assets/credits.txt" target="_blank" rel="noreferrer">Asset credits</a></p></section>:<>
       <section className={styles.quest}><small>CONTRACT {Math.min(save.mission+1,missions.length)} / {missions.length}</small><h1>{mission?.name||'Shift complete'}</h1><p>{mission?.brief||'All deliveries completed. Explore or practise at the range.'}</p>{mission&&<strong>{hud.distance} m <span>· ${mission.reward} reward</span></strong>}</section>
       <aside className={styles.wallet}><b>${save.cash.toLocaleString()}</b><small>GAME MONEY</small>{save.owns&&<span>Ammo {save.ammo} / {save.reserve}</span>}<span>{hud.vehicle||'On foot'} · {hud.speed} km/h</span></aside>
       <button className={styles.mapButton} onClick={()=>setMapOpen(!mapOpen)} aria-label="Toggle city map">{mapOpen?'Close map':'City map'}</button>
@@ -313,8 +389,8 @@ export default function CityGame() {
       </div>
       <p className={styles.notice} role="status">{notice||'E: enter vehicle · WASD: move · Space: brake · B: shop · F: fire · R: reload'}</p>
       <div className={styles.controls}><div className={styles.pad}>{hold('w','↑')}{hold('a','←')}{hold('s','↓')}{hold('d','→')}</div><div className={styles.actions}><button onClick={()=>action.current('vehicle')}>{hud.vehicle?'Exit':'Enter vehicle'}</button>{hold(hud.vehicle?' ':'shift',hud.vehicle?'Brake':'Run')}<button onClick={()=>action.current('shop')}>{save.owns?'Ammo at S':'Gun $300'}</button>{save.owns&&<><button onClick={()=>action.current('fire')}>Fire</button><button onClick={()=>action.current('reload')}>Reload</button></>}</div></div>
-      <footer className={styles.footer}><span>{online.status} · {save.hits} target hits</span><label>Graphics <select value={quality} onChange={e=>{qualityRef.current=e.target.value;setQuality(e.target.value);}}><option value="balanced">Balanced</option><option value="low">Performance</option></select></label></footer>
-      {!ready&&!error&&<div className={styles.overlay}>Building Gulf District…</div>}
+      <footer className={styles.footer}><span>{online.status} · {save.hits} target hits</span><label>Graphics <select value={quality} onChange={e=>{qualityRef.current=e.target.value;setQuality(e.target.value);}}><option value="balanced">Balanced</option><option value="low">Performance</option><option value="high">High detail</option></select></label></footer>
+      {!ready&&!error&&<div className={styles.overlay}>Loading Gulf District models…</div>}
       {paused&&!error&&<div className={styles.overlay}><h2>Take a breather.</h2><p>Your progress is saved on this browser.</p><button onClick={()=>pause(false)}>Continue</button><Link href="/">Back to ZION</Link></div>}
       <div className={styles.rotate}>↻ Rotate your phone for a wider view</div>
     </>}

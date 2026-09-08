@@ -1,5 +1,7 @@
 "use client";
 
+import MessageTime from "./message-time";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
@@ -969,6 +971,8 @@ export function Experience({
                       <span className="message-text">
                         {item.display_message ?? item.message}
                       </span>
+                      <div className="message-meta">
+                      <MessageTime sentAt={item.created_at} />
                       {item.sender_id === userId ? (
                         <span
                           className={`message-receipt ${item.read_at ? "read" : "sent"}`}
@@ -977,6 +981,7 @@ export function Experience({
                           {item.read_at ? "✓✓" : "✓"}
                         </span>
                       ) : null}
+                      </div>
                     </div>
                   ))
                 ) : (
