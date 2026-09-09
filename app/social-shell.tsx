@@ -1,5 +1,6 @@
 "use client";
 
+import DeviceSessions from "./device-sessions";
 import PublicFeed from "./public-feed";
 import MessageTime from "./message-time";
 
@@ -723,6 +724,7 @@ export function SocialShell() {
 
   return (
     <>
+      <DeviceSessions userId={user.id} />
       <Experience
         profile={profile}
         friendUnreadCount={friendUnreadCount}
@@ -780,7 +782,7 @@ export function SocialShell() {
           onClose={() => setAccountManagerOpen(false)}
         />
       ) : null}
-      {feedOpen && <PublicFeed user={user} onClose={()=>setFeedOpen(false)} />}
+      {feedOpen && <PublicFeed user={user} isAdmin={profile.is_admin} onClose={()=>setFeedOpen(false)} />}
       {reelsOpen ? (
         <ZionReels user={user} onClose={() => setReelsOpen(false)} />
       ) : null}
@@ -3704,6 +3706,7 @@ function FriendChat({
       alert("Choose an image, video or audio file.");
       return;
     }
+    if(forceViewOnce && file.size>4*1024*1024-1024){alert("View-once photos/videos must be under 4 MB.");return;}
     setUploading(true);
     setFriendUploadProgress(0);
     try {
@@ -3733,7 +3736,7 @@ function FriendChat({
           message: encryptedMetadata,
           media_path: path,
           media_type: mediaType,
-          view_once: mediaType === "image" && forceViewOnce,
+          view_once: (mediaType === "image" || mediaType === "video") && forceViewOnce,
           reply_to_id: replyTo?.id ?? null,
         });
       if (messageError) throw messageError;
@@ -3778,16 +3781,6 @@ function FriendChat({
   const openViewOnce = async (item: FriendMessage) => {
     if (!supabase || item.sender_id === user.id || item.viewed_at) return;
     if (!item.media_path) return alert("This photo is no longer available.");
-    const { data: signed } = await supabase.storage
-      .from("chat-media")
-      .createSignedUrl(item.media_path, 30);
-    if (!signed?.signedUrl)
-      return alert("This photo is no longer available.");
-    const { data: consumed, error } = await supabase.rpc("consume_view_once_message", {
-      p_message_id: item.id,
-    });
-    if (error || !consumed)
-      return alert(error?.message ?? "This photo was already opened.");
     try {
       const decryptedMetadata = await decryptText(
         item.message,
@@ -3796,7 +3789,8 @@ function FriendChat({
         `friend:${friendship.id}`,
       );
       const metadata = JSON.parse(decryptedMetadata ?? "{}") as { mime?: string };
-      const response = await fetch(signed.signedUrl, { cache: "no-store" });
+      const {data:session}=await supabase.auth.getSession();
+      const response=await fetch('/api/view-once',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.session?.access_token??''}`},body:JSON.stringify({id:item.id}),cache:'no-store'});
       if (!response.ok) throw new Error("Photo download failed");
       const blob = item.encrypted
         ? await decryptFile(
@@ -3821,13 +3815,15 @@ function FriendChat({
       setMediaPreview(null);
       setOpenedOnceIds((current) => current.filter((id) => id !== item.id));
       void load();
-    }, 10_000);
+    }, item.media_type==="video"?300_000:10_000);
   };
   const closeMediaPreview = () => {
     if (viewOnceTimerRef.current) window.clearTimeout(viewOnceTimerRef.current);
     const viewedId = mediaPreview?.view_once ? mediaPreview.id : null;
     setMediaPreview(null);
     if (viewedId) {
+      if(mediaPreview?.media_url)URL.revokeObjectURL(mediaPreview.media_url);
+      if(mediaPreview?.media_path)mediaUrlsRef.current.delete(mediaPreview.media_path);
       setOpenedOnceIds((current) => current.filter((id) => id !== viewedId));
       void load();
     }
@@ -4189,7 +4185,7 @@ function FriendChat({
                 item.sender_id === user.id ? (
                   <div className="view-once-sent">
                     <ImagePlus />
-                    <span>View-once photo sent</span>
+                    <span>View-once media sent</span>
                   </div>
                 ) : null}
                 {!item.deleted_at &&
@@ -4202,8 +4198,8 @@ function FriendChat({
                     onClick={() => void openViewOnce(item)}
                   >
                     {item.viewed_at
-                      ? "Photo already opened"
-                      : "View photo once"}
+                      ? "Media already opened"
+                      : "Open media once"}
                   </button>
                 ) : null}
                 {!item.deleted_at &&
@@ -4224,7 +4220,7 @@ function FriendChat({
                 ) : null}
                 {!item.deleted_at &&
                 item.media_url &&
-                item.media_type === "video" ? (
+                item.media_type === "video" && !item.view_once ? (
                   <video
                     src={item.media_url}
                     controls
@@ -4328,7 +4324,7 @@ function FriendChat({
               const file = event.target.files?.[0];
               event.target.value = "";
               if (!file) return;
-              if (file.type.startsWith("image/")) setMediaChoice(file);
+              if (file.type.startsWith("image/") || file.type.startsWith("video/")) setMediaChoice(file);
               else void upload(file, false);
             }}
           />
@@ -4370,7 +4366,7 @@ function FriendChat({
         {mediaChoice ? (
           <div className="media-choice-overlay" onClick={() => setMediaChoice(null)}>
             <div className="media-choice-sheet" onClick={(event) => event.stopPropagation()}>
-              <b>Send photo</b>
+              <b>Send photo / video</b>
               <button onClick={() => void upload(mediaChoice, false)}>
                 Send normally
               </button>
@@ -4420,6 +4416,9 @@ function FriendChat({
             {mediaPreview.media_type === "video" ? (
               <video
                 src={mediaPreview.media_url}
+                onEnded={mediaPreview.view_once ? closeMediaPreview : undefined}
+                controlsList="nodownload"
+                disablePictureInPicture
                 controls
                 autoPlay
                 playsInline

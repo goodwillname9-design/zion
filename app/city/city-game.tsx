@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import Joystick from './joystick';
 import { initialSave, missions, parseSave, shop, type Save } from './game-data';
 import styles from './city.module.css';
 import { useCityOnline, type Position } from './use-city-online';
@@ -29,9 +30,18 @@ export default function CityGame() {
   const [mapOpen, setMapOpen] = useState(false);
   const networkPosition = useRef<Position>({x:3,z:3,yaw:0,vehicle:''});
   const online = useCityOnline(networkPosition);
+  const liveOnline=useRef(online);
+  useEffect(()=>{liveOnline.current=online;},[online]);
   const peerStates = online.peers;
   const [roomCode,setRoomCode] = useState('');
   const [lobbyOpen,setLobbyOpen] = useState(false);
+  const previousRoundActive=useRef(false);
+  useEffect(()=>{
+    const active=!!online.round?.active;
+    if(active){setStarted(true);setLobbyOpen(false);pause(false);}
+    else if(online.round&&previousRoundActive.current){setLobbyOpen(true);pause(true);}
+    previousRoundActive.current=active;
+  },[online.round?.active,online.round?.number]);
   function persist(next: Save) {
     saveRef.current = next; setSave(next);
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(next)); } catch { setNotice('Storage unavailable: progress lasts for this session only.'); }
@@ -214,6 +224,11 @@ export default function CityGame() {
         if(name==='respawn'){hp=100;setHealth(100);x=3;z=3;active=-1;speed=0;lastDamage=elapsed;pause(false);return;}
 
         if(pausedRef.current)return;
+        if(liveOnline.current.room && ['fire','reload','shop'].includes(name)){
+          if(name==='shop'){setNotice('Online rounds use server ammo. Reload to refill.');return;}
+          if(name==='fire'){if(elapsed-lastShot<.3)return;lastShot=elapsed;}
+          void liveOnline.current.command(name).then(message=>{if(message)setNotice(message);}).catch(e=>setNotice(e.message));return;
+        }
         if(name.startsWith('look:')){yaw-=Number(name.slice(5))*.006;return;}
         if(name==='vehicle') {
           if(active>=0) {
@@ -272,25 +287,33 @@ export default function CityGame() {
       const tick=(now:number)=>{
         frame=requestAnimationFrame(tick);const dt=Math.min((now-last)/1000,.04);last=now;
         if(document.hidden||pausedRef.current)return;
-        if(hp<=0){pause(true);return;}
+        const session=liveOnline.current;
+        if(session.room){
+          const state=session.self.current;
+          if(state){
+            hp=state.hp; if(now-report>200)setHealth(hp);
+            if(Math.hypot(x-state.x,z-state.z)>8){x=state.x;z=state.z;speed=0;active=-1;}
+          }
+        }else if(hp<=0){pause(true);return;}
         elapsed+=dt;frames++;
-        gun.visible=saveRef.current.owns&&active<0;
+        gun.visible=(saveRef.current.owns||!!session.room)&&active<0;
         if(reloadUntil&&elapsed>=reloadUntil){const amount=Math.min(12-saveRef.current.ammo,saveRef.current.reserve);persist({...saveRef.current,ammo:saveRef.current.ammo+amount,reserve:saveRef.current.reserve-amount});reloadUntil=0;setNotice('Reloaded.');}
         if(currentQuality!==qualityRef.current){currentQuality=qualityRef.current;pixelRatio=Math.min(devicePixelRatio,currentQuality==='low'?.8:currentQuality==='high'?1.25:1);renderer.setPixelRatio(pixelRatio);renderer.shadowMap.enabled=currentQuality==='high';resize();}
         const k=keys.current,forward=Number(k.has('w')||k.has('arrowup'))-Number(k.has('s')||k.has('arrowdown'));
         const steering=Number(k.has('a')||k.has('arrowleft'))-Number(k.has('d')||k.has('arrowright'));
-        const driving=active>=0, max=driving?(parked[active].bike?20:24):(k.has('shift')?6:3.4);
+        const driving=active>=0, max=session.room&&hp<=0?0:driving?(parked[active].bike?20:24):(k.has('shift')?6:3.4);
         speed+=(forward*max-speed)*Math.min(1,dt*(driving?1.4:10));if(k.has(' '))speed*=Math.exp(-dt*8);
-        yaw+=steering*dt*(driving?1.4*Math.min(1,Math.abs(speed)/3)*Math.sign(speed):2.1);
-        const nx=x+Math.sin(yaw)*speed*dt,nz=z+Math.cos(yaw)*speed*dt;
+        if(driving)yaw+=steering*dt*1.4*Math.min(1,Math.abs(speed)/3)*Math.sign(speed);
+        const strafe=driving||hp<=0?0:steering*(k.has('shift')?6:3.4)*dt;
+        const nx=x+Math.sin(yaw)*speed*dt-Math.cos(yaw)*strafe,nz=z+Math.cos(yaw)*speed*dt+Math.sin(yaw)*strafe;
         if(!blocked(nx,nz,driving?1.6:.5)){x=nx;z=nz;}else speed=0;
         player.group.position.set(x,driving?.3:0,z);player.group.rotation.y=yaw;player.group.visible=!driving||parked[active].bike;
         player.mixer.update(dt * (driving ? 0 : Math.min(2,Math.abs(speed)/1.2)));
         player.limbs.forEach((l,i)=>l.rotation.x=driving?0:Math.sin(elapsed*10+i%2*Math.PI)*Math.min(.45,Math.abs(speed)*.12));
         if(driving){const v=parked[active];v.group.position.set(x,0,z);v.group.rotation.y=yaw;v.wheels.forEach(w=>w.rotation.x+=speed*dt*2);}
-        npcs.forEach((p,i)=>{if(p.group.visible)p.mixer.update(dt);if(p.health<=0&&elapsed>=p.downUntil)p.health=100;p.group.visible=p.health>0;const t=(elapsed*1.2+p.phase)%165-70;p.group.position.set(p.baseX,0,t);p.limbs.forEach((l,j)=>l.rotation.x=Math.sin(elapsed*6+j%2*Math.PI+i)*.4);});
-        for(const drop of loot)if(!drop.used&&Math.hypot(x-drop.x,z-drop.z)<2.5){drop.used=true;drop.mesh.visible=false;if(drop.kind==='weapon'){persist({...saveRef.current,owns:true,ammo:12,reserve:60});setNotice('Rifle collected. Drag the scene to aim; F / Fire to shoot.');}else{hp=Math.min(100,hp+45);setHealth(hp);setNotice('Medical supplies collected.');}}
-        if(active<0&&elapsed-lastDamage>2&&npcs.some(p=>p.health>0&&p.group.position.distanceTo(player.group.position)<4)){hp=Math.max(0,hp-10);lastDamage=elapsed;setHealth(hp);setNotice('Hostile patrol nearby! Move away or defend yourself.');if(!hp)pause(true);}
+        npcs.forEach((p,i)=>{if(p.group.visible)p.mixer.update(dt);if(p.health<=0&&elapsed>=p.downUntil)p.health=100;p.group.visible=!session.room&&p.health>0;const t=(elapsed*1.2+p.phase)%165-70;p.group.position.set(p.baseX,0,t);p.limbs.forEach((l,j)=>l.rotation.x=Math.sin(elapsed*6+j%2*Math.PI+i)*.4);});
+        for(const drop of loot)if(!session.room&&!drop.used&&Math.hypot(x-drop.x,z-drop.z)<2.5){drop.used=true;drop.mesh.visible=false;if(drop.kind==='weapon'){persist({...saveRef.current,owns:true,ammo:12,reserve:60});setNotice('Rifle collected. Drag the scene to aim; F / Fire to shoot.');}else{hp=Math.min(100,hp+45);setHealth(hp);setNotice('Medical supplies collected.');}}
+        if(!session.room&&active<0&&elapsed-lastDamage>2&&npcs.some(p=>p.health>0&&p.group.position.distanceTo(player.group.position)<4)){hp=Math.max(0,hp-10);lastDamage=elapsed;setHealth(hp);setNotice('Hostile patrol nearby! Move away or defend yourself.');if(!hp)pause(true);}
         animals.forEach((a,i)=>{a.group.position.z=a.pz+Math.sin(elapsed*.1+i)*2;a.group.rotation.y=Math.cos(elapsed*.1+i)>0?0:Math.PI;a.legs.forEach((leg,j)=>leg.rotation.x=Math.sin(elapsed*3+j*Math.PI/2)*.16);});
         traffic.forEach((v,i)=>{const tz=(elapsed*(6+i%3)+v.offset)%230-115;v.group.position.set(v.lane,0,tz);v.wheels.forEach(w=>w.rotation.x+=dt*12);});
         networkPosition.current={x,z,yaw,vehicle:driving?(parked[active].bike?'Motorcycle':'Sedan'):''};
@@ -303,8 +326,8 @@ export default function CityGame() {
           if(!remote&&remotePlayers.size<12){remote={human:person('#699aab'),car:car(2),bike:car(2,true),label:remoteLabel(p.username),username:p.username};remotePlayers.set(p.id,remote);remote.human.group.position.set(p.x,0,p.z);remote.car.group.position.set(p.x,0,p.z);remote.bike.group.position.set(p.x,0,p.z);}
           if(!remote)continue;
           const object=p.vehicle==='Sedan'?remote.car.group:p.vehicle==='Motorcycle'?remote.bike.group:remote.human.group;
-          object.visible=true;desired.set(p.x,0,p.z);object.position.lerp(desired,1-Math.exp(-dt*9));object.rotation.y=p.yaw;
-          remote.label.visible=true;remote.label.position.copy(object.position);remote.label.position.y=3;
+          object.visible=p.hp>0;desired.set(p.x,0,p.z);object.position.lerp(desired,1-Math.exp(-dt*9));object.rotation.y=p.yaw;
+          remote.label.visible=p.hp>0;remote.label.position.copy(object.position);remote.label.position.y=3;
           remote.human.mixer.update(dt);
           remote.human.limbs.forEach((l,i)=>l.rotation.x=Math.sin(elapsed*8+i%2*Math.PI)*.25);
         }
@@ -333,9 +356,10 @@ export default function CityGame() {
     <div ref={host} className={styles.world}/>
     <header className={styles.header}><Link href="/">← ZION</Link><span>ZION STORY <small>FOREST OUTPOST</small></span><div><button onClick={()=>{setLobbyOpen(!lobbyOpen);pause(!lobbyOpen);}}>Friends {online.count||''}</button><button onClick={fullscreen}>Fullscreen</button>{started&&<button onClick={()=>pause(!paused)}>{paused?'Resume':'Pause'}</button>}</div></header>
     {!started?<section className={styles.intro}><small>AN ORIGINAL CITY ADVENTURE</small><h1>Your next<br/><em>shift starts here.</em></h1><p>Explore a forest trails and outposts. Drive, deliver and discover.<br/>Collect the rifle crate near spawn, explore and complete nine missions. Avoid hostile patrols.</p><button onClick={()=>{setStarted(true);pause(false);}}>Enter Forest Outpost →</button><p className={styles.disclaimer}>Original forest arena • Lightweight prototype environment and animated sample character.<br/>Progress saves on this browser. No real-money purchases. <a href="/game-assets/credits.txt" target="_blank" rel="noreferrer">Asset credits</a></p></section>:<>
+      {online.room&&online.self.current?.hp===0&&<p className={styles.notice}>Downed · automatic respawn in 5 seconds</p>}
       <div className={styles.crosshair} aria-hidden="true">+</div>
       <section className={styles.quest}><small>CONTRACT {Math.min(save.mission+1,missions.length)} / {missions.length}</small><h1>{mission?.name||'Shift complete'}</h1><p>{mission?.brief||'All deliveries completed. Explore or practise at the range.'}</p>{mission&&<strong>{hud.distance} m <span>· ${mission.reward} reward</span></strong>}</section>
-      <aside className={styles.wallet}><b>${save.cash.toLocaleString()}</b><small>GAME MONEY</small><span>Health {health}/100</span>{save.owns&&<span>Ammo {save.ammo} / {save.reserve}</span>}<span>{hud.vehicle||'On foot'} · {hud.speed} km/h</span></aside>
+      <aside className={styles.wallet}><b>${save.cash.toLocaleString()}</b><small>GAME MONEY</small><span>Health {health}/100</span>{online.room?<span>Ammo {online.self.current?.ammo??0} · Kills {online.self.current?.kills??0}</span>:save.owns&&<span>Ammo {save.ammo} / {save.reserve}</span>}<span>{hud.vehicle||'On foot'} · {hud.speed} km/h</span></aside>
       <button className={styles.mapButton} onClick={()=>setMapOpen(!mapOpen)} aria-label="Toggle trail map">{mapOpen?'Close map':'Trail map'}</button>
       <div className={`${styles.map} ${mapOpen?styles.expanded:''}`}>
         <svg viewBox="-125 -125 250 250" role="img" aria-label="Trail map: player arrow, gold mission, S range shop">
@@ -348,13 +372,13 @@ export default function CityGame() {
         </svg><small>YOU △ · MISSION ● · SHOP S</small>
       </div>
       <p className={styles.notice} role="status">{notice||'Drag: aim · WASD/arrows: move · E: vehicle · F: fire · R: reload'}</p>
-      <div className={styles.controls}><div className={styles.pad}>{hold('w','↑')}{hold('a','←')}{hold('s','↓')}{hold('d','→')}</div><div className={styles.actions}><button onClick={()=>action.current('vehicle')}>{hud.vehicle?'Exit':'Enter vehicle'}</button>{hold(hud.vehicle?' ':'shift',hud.vehicle?'Brake':'Run')}<button onClick={()=>action.current('shop')}>{save.owns?'Ammo at S':'Gun $300'}</button>{save.owns&&<><button onClick={()=>action.current('fire')}>Fire</button><button onClick={()=>action.current('reload')}>Reload</button></>}</div></div>
+      <div className={styles.controls}><Joystick onMove={(x,y)=>{for(const [key,pressed] of [['w',y<-.2],['s',y>.2],['a',x<-.2],['d',x>.2]] as const){if(pressed)keys.current.add(key);else keys.current.delete(key);}}}/><div className={styles.actions}><button onClick={()=>action.current('vehicle')}>{hud.vehicle?'Exit':'Enter vehicle'}</button>{hold(hud.vehicle?' ':'shift',hud.vehicle?'Brake':'Run')}<button onClick={()=>action.current('shop')}>{save.owns?'Ammo at S':'Gun $300'}</button>{(save.owns||online.room)&&<><button onClick={()=>action.current('fire')}>Fire</button><button onClick={()=>action.current('reload')}>Reload</button></>}</div></div>
       <footer className={styles.footer}><span>{online.status} · {save.hits} target hits</span><label>Graphics <select value={quality} onChange={e=>{qualityRef.current=e.target.value;setQuality(e.target.value);}}><option value="balanced">Balanced</option><option value="low">Performance</option><option value="high">High detail</option></select></label></footer>
       {!ready&&!error&&<div className={styles.overlay}>Loading Forest Outpost models…</div>}
       {paused&&!error&&<div className={styles.overlay}><h2>{health?"Take a breather.":"You were downed"}</h2><p>Your progress is saved on this browser.</p><button onClick={()=>health?pause(false):action.current("respawn")}>{health?"Continue":"Respawn"}</button><Link href="/">Back to ZION</Link></div>}
       <div className={styles.rotate}>↻ Rotate your phone for a wider view</div>
     </>}
-    {lobbyOpen&&<section className={styles.overlay}><h2>Explore with friends</h2><p>Up to 4 players · accepted friends of the host only.</p>{online.room?<><p>Room code: <strong>{online.room.code}</strong></p><button onClick={async()=>{try{await navigator.clipboard.writeText(online.room!.code);setNotice('Room code copied. Send it to your ZION friends.');}catch{setNotice('Select and copy the room code manually.');}}}>Copy room code</button><button onClick={online.leave}>Leave room</button></>:<><button disabled={online.busy} onClick={()=>online.join()}>Create private room</button><label>Friend’s room code <input value={roomCode} maxLength={16} onChange={e=>setRoomCode(e.target.value)} placeholder="16-character room code"/></label><button disabled={online.busy||roomCode.length!==16} onClick={()=>online.join(roomCode)}>Join room</button></>}<p role="status">{online.status}{online.count?` · ${online.count}/4 players`:''}</p><button onClick={()=>{setLobbyOpen(false);pause(false);}}>Back to game</button><small>First-time setup: run SUPABASE_V63_CITY.sql. Sign in through ZION first.</small></section>}
+    {lobbyOpen&&<section className={styles.overlay}><h2>Forest arena with friends</h2><p>Up to 4 players · accepted friends of the host only.</p>{online.room?<><p>Room code: <strong>{online.room.code}</strong></p><button onClick={async()=>{try{await navigator.clipboard.writeText(online.room!.code);setNotice('Room code copied. Send it to your ZION friends.');}catch{setNotice('Select and copy the room code manually.');}}}>Copy room code</button>{online.round&&<><p>{online.round.active?`Round ${online.round.number} · ends ${new Date(online.round.ends_at!).toLocaleTimeString()}`:online.round.number?'Round finished':'Waiting for host'}</p><p>{[...(online.self.current?[online.self.current]:[]),...online.peers.current].sort((a,b)=>b.kills-a.kills).map(p=>`${p.username}: ${p.kills} kills`).join(' · ')}</p>{online.round.host&&!online.round.active&&<button onClick={()=>void online.command('start').then(()=>{setLobbyOpen(false);pause(false);}).catch(e=>setNotice(e.message))}>Start 3-minute round</button>}</>}<button onClick={online.leave}>Leave room</button></>:<><button disabled={online.busy} onClick={()=>online.join()}>Create private room</button><label>Friend’s room code <input value={roomCode} maxLength={16} onChange={e=>setRoomCode(e.target.value)} placeholder="16-character room code"/></label><button disabled={online.busy||roomCode.length!==16} onClick={()=>online.join(roomCode)}>Join room</button></>}<p role="status">{online.status}{online.count?` · ${online.count}/4 players`:''}</p><button onClick={()=>{setLobbyOpen(false);pause(false);}}>Back to game</button><small>First-time setup: run V63 and V68 combat SQL. Sign in through ZION first.</small></section>}
     {error&&<div className={styles.overlay}><p>{error}</p><button onClick={()=>location.reload()}>Reload</button><Link href="/">Back to ZION</Link></div>}
   </main>;
 }
