@@ -65,51 +65,26 @@ export default function CityGame() {
     let cleanup = () => {};
     void (async () => {
       const T = await import('three');
-      const [{ GLTFLoader }, { clone: cloneSkeleton }, { RoomEnvironment }] = await Promise.all([
-        import('three/addons/loaders/GLTFLoader.js'),
-        import('three/addons/utils/SkeletonUtils.js'),
-        import('three/addons/environments/RoomEnvironment.js'),
-      ]);
-      const loader = new GLTFLoader();
-      const humanAsset = await loader.loadAsync('/game-assets/cesium-man.glb');
-      const releaseAssets = () => {
-        const released = new Set<unknown>();
-        for(const asset of [humanAsset])asset.scene.traverse(object=>{
-          if(!(object instanceof T.Mesh))return;
-          if(!released.has(object.geometry)){object.geometry.dispose();released.add(object.geometry);}
-          for(const material of Array.isArray(object.material)?object.material:[object.material])if(!released.has(material)){
-            for(const value of Object.values(material))if(value instanceof T.Texture&&!released.has(value)){value.dispose();released.add(value);}
-            material.dispose();released.add(material);
-          }
-        });
-      };
+      const { RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js');
+      const releaseAssets = () => {};
       if (disposed || !host.current) { releaseAssets(); return; }
       cleanup=releaseAssets;
       const container = host.current;
       const scene = new T.Scene(); scene.background = new T.Color('#b9d6dc'); scene.fog = new T.Fog('#b9d6dc', 65, 185);
       const renderer = new T.WebGLRenderer({ antialias: devicePixelRatio<=1.5, powerPreference: 'high-performance' });
       renderer.setPixelRatio(Math.min(devicePixelRatio, 1));
-      renderer.shadowMap.enabled = false; renderer.shadowMap.type = T.PCFSoftShadowMap;
-      renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+      renderer.shadowMap.enabled = qualityRef.current!=='low'; renderer.shadowMap.type = T.PCFSoftShadowMap;
+      renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = .95;
       container.appendChild(renderer.domElement);
       cleanup=()=>{releaseAssets();renderer.dispose();renderer.domElement.remove();};
       const camera = new T.PerspectiveCamera(58, 1, .1, 280);
-      scene.add(new T.HemisphereLight('#c2d8cf', '#343e29', 1.8));
+      scene.add(new T.HemisphereLight('#c2d8ef', '#344128', .85));
       const sun = new T.DirectionalLight('#ffe0af', 2); sun.position.set(-50, 90, 45); sun.castShadow = true;
       sun.shadow.mapSize.set(1024, 1024); Object.assign(sun.shadow.camera, { left: -60, right: 60, top: 60, bottom: -60, far: 190 });
       sun.shadow.bias = -.001; scene.add(sun, sun.target);
       const geometries = new Set<InstanceType<typeof T.BufferGeometry>>();
       const materials = new Set<InstanceType<typeof T.Material>>();
       const textures: InstanceType<typeof T.Texture>[] = [];
-      for (const asset of [humanAsset]) asset.scene.traverse(object => {
-        if (!(object instanceof T.Mesh)) return;
-        geometries.add(object.geometry);
-        for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
-          materials.add(material);
-          for (const value of Object.values(material)) if (value instanceof T.Texture && !textures.includes(value)) textures.push(value);
-        }
-        object.castShadow = object.receiveShadow = true;
-      });
       const pmrem = new T.PMREMGenerator(renderer);
       const roomEnvironment = new RoomEnvironment();
       const environment = pmrem.fromScene(roomEnvironment, .04);
@@ -117,11 +92,11 @@ export default function CityGame() {
       roomEnvironment.dispose(); pmrem.dispose();
       const mixers: InstanceType<typeof T.AnimationMixer>[] = [];
       const boxGeo = new T.BoxGeometry(1, 1, 1); geometries.add(boxGeo);
-      const sphereGeo = new T.SphereGeometry(1, 12, 8); geometries.add(sphereGeo);
+      const sphereGeo = new T.SphereGeometry(1, 20, 14); geometries.add(sphereGeo);
       const wheelGeo = new T.CylinderGeometry(.36, .36, .22, 14); geometries.add(wheelGeo);
       const mat = (color: string, metalness = 0, roughness = .8) => { const m = new T.MeshStandardMaterial({ color, metalness, roughness }); materials.add(m); return m; };
       const concrete = mat('#a3a29a'), white = mat('#dedacb'), dark = mat('#182128'), rubber = mat('#151719'), chrome = mat('#a5acb0', .8, .2);
-      const glass = mat('#385160', .3, .3), green = mat('#395a34');
+      const glass = mat('#385160', .3, .3), green = mat('#466c32');
       const box = (parent: InstanceType<typeof T.Object3D>, m: InstanceType<typeof T.Material>, x: number, y: number, z: number, w: number, h: number, d: number) => {
         const o = new T.Mesh(boxGeo, m); o.position.set(x,y,z); o.scale.set(w,h,d); o.castShadow = o.receiveShadow = true; parent.add(o); return o;
       };
@@ -132,7 +107,7 @@ export default function CityGame() {
       let textureSeed=73;const tr=()=>{textureSeed=(textureSeed*1664525+1013904223)>>>0;return textureSeed/4294967296};
       for(let i=0;i<9000;i++){gc.fillStyle=i%2?'#889163':'#4e623d';gc.globalAlpha=.15+tr()*.2;gc.fillRect(tr()*256,tr()*256,1+tr()*3,1+tr()*2);}gc.globalAlpha=1;
       const groundTexture=new T.CanvasTexture(groundCanvas);groundTexture.wrapS=groundTexture.wrapT=T.RepeatWrapping;groundTexture.repeat.set(45,45);groundTexture.colorSpace=T.SRGBColorSpace;groundTexture.anisotropy=Math.min(4,renderer.capabilities.getMaxAnisotropy());textures.push(groundTexture);
-      const earth=mat('#c4c8aa');earth.map=groundTexture;
+      const earth=mat('#9ba779');earth.map=groundTexture;
       box(scene,earth,0,-.2,0,250,.4,250);
       const obstacles: { x: number; z: number; w: number; d: number }[] = [];
       const walls:InstanceType<typeof T.Mesh>[]=[];
@@ -141,13 +116,13 @@ export default function CityGame() {
       for(const z of [-84,-42,0,42,84])box(scene,trail,0,.014,z,240,.03,6);
       const trunkGeo=new T.CylinderGeometry(.18,.35,1,7),leafGeo=new T.IcosahedronGeometry(1,1);
       geometries.add(trunkGeo);geometries.add(leafGeo);
-      const trunks=new T.InstancedMesh(trunkGeo,mat('#66513b'),220),leaves=new T.InstancedMesh(leafGeo,green,440);
+      const trunks=new T.InstancedMesh(trunkGeo,mat('#66513b'),220),leaves=new T.InstancedMesh(leafGeo,green,1320);
       const pose=new T.Object3D();
       for(let i=0;i<220;i++){
         let tx=0,tz=0;
         do{tx=rand()*226-113;tz=rand()*226-113;}while([-42,0,42,84].some(v=>Math.abs(tx-v)<7)||[-84,-42,0,42,84].some(v=>Math.abs(tz-v)<7));
         const height=5+rand()*5;pose.position.set(tx,height/2,tz);pose.scale.set(1,height,1);pose.updateMatrix();trunks.setMatrixAt(i,pose.matrix);
-        for(let j=0;j<2;j++){pose.position.set(tx+(j?.9:0),height+j*1.1,tz);pose.scale.set(2.3-j*.5,2.8-j*.6,2.3-j*.5);pose.rotation.y=rand()*6;pose.updateMatrix();leaves.setMatrixAt(i*2+j,pose.matrix);}
+        for(let j=0;j<2;j++){pose.position.set(tx+(j?.9:0),height+j*1.1,tz);pose.scale.set(2.3-j*.5,2.8-j*.6,2.3-j*.5);pose.rotation.y=rand()*6;pose.updateMatrix();for(let cluster=0;cluster<3;cluster++){const a=cluster*Math.PI*2/3+j;pose.position.set(tx+Math.cos(a)*1.3,height+j*1.1,tz+Math.sin(a)*1.3);pose.scale.set(1.75,1.85,1.75);pose.updateMatrix();leaves.setMatrixAt(i*6+j*3+cluster,pose.matrix);leaves.setColorAt(i*6+j*3+cluster,new T.Color().setHSL(.25+(i%3)*.015,.3,.32+(cluster%2)*.08));}}
         obstacles.push({x:tx,z:tz,w:.3,d:.3});
       }
       trunks.castShadow=leaves.castShadow=true;trunks.computeBoundingSphere();leaves.computeBoundingSphere();scene.add(trunks,leaves);
@@ -159,6 +134,18 @@ export default function CityGame() {
       const hillGeo=new T.ConeGeometry(1,1,7);geometries.add(hillGeo);
       const hills=new T.InstancedMesh(hillGeo,mat('#638777'),18);
       for(let i=0;i<18;i++){const a=i/18*Math.PI*2;pose.position.set(Math.sin(a)*155,16,Math.cos(a)*155);pose.scale.set(30,25+(i%4)*10,32);pose.rotation.set(0,a,0);pose.updateMatrix();hills.setMatrixAt(i,pose.matrix);}hills.computeBoundingSphere();scene.add(hills);
+      // Grass uses one instanced draw call; no per-blade animation or collisions.
+      const grassGeo=new T.BufferGeometry();grassGeo.setAttribute('position',new T.Float32BufferAttribute([-.1,0,0,.1,0,0,.04,.6,.02, 0,0,-.1,0,0,.1,.02,.55,.04],3));grassGeo.computeVertexNormals();geometries.add(grassGeo);
+      const grassMat=mat('#608631');grassMat.side=T.DoubleSide;
+      const grass=new T.InstancedMesh(grassGeo,grassMat,14000);let grassCount=0;
+      for(let i=0;i<18000&&grassCount<14000;i++){const gx=tr()*226-113,gz=tr()*226-113;if([-42,0,42,84].some(v=>Math.abs(gx-v)<4.2)||[-84,-42,0,42,84].some(v=>Math.abs(gz-v)<3.6)||obstacles.some(o=>Math.abs(gx-o.x)<o.w+1&&Math.abs(gz-o.z)<o.d+1))continue;pose.position.set(gx,.03,gz);pose.rotation.set(0,tr()*Math.PI,0);const scale=.45+tr()*.8;pose.scale.set(scale,scale,scale);pose.updateMatrix();grass.setMatrixAt(grassCount,pose.matrix);grass.setColorAt(grassCount,new T.Color().setHSL(.22+tr()*.07,.38,.23+tr()*.12));grassCount++;}
+      grass.count=grassCount;grass.receiveShadow=true;grass.computeBoundingSphere();scene.add(grass);
+      // Stone lodge details remain within the original building collision footprints.
+      const stoneCanvas=document.createElement('canvas');stoneCanvas.width=stoneCanvas.height=256;const sc=stoneCanvas.getContext('2d')!;sc.fillStyle='#716b5b';sc.fillRect(0,0,256,256);
+      for(let row=0;row<8;row++)for(let col=-1;col<5;col++){const c=145+Math.floor(tr()*40);sc.fillStyle=`rgb(${c},${c-5},${c-18})`;sc.fillRect(col*64+(row%2)*32+2,row*32+2,60,28);}
+      const stoneTexture=new T.CanvasTexture(stoneCanvas);stoneTexture.colorSpace=T.SRGBColorSpace;stoneTexture.wrapS=stoneTexture.wrapT=T.RepeatWrapping;textures.push(stoneTexture);const stone=mat('#ded9c9');stone.map=stoneTexture;stone.bumpMap=stoneTexture;stone.bumpScale=.08;
+      const roofGeo=new T.ConeGeometry(1,1,4);geometries.add(roofGeo);const roofMaterial=mat('#914f32');
+      for(const [cx,cz] of [[-22,22],[65,-22],[-65,-65]]){box(scene,stone,cx,1.75,cz,6.04,3.5,5.04);const roof=new T.Mesh(roofGeo,roofMaterial);roof.position.set(cx,4.2,cz);roof.scale.set(4.6,2,4);roof.rotation.y=Math.PI/4;roof.castShadow=true;scene.add(roof);for(const dx of [-1.8,1.8]){box(scene,white,cx+dx,2,cz+2.55,1.05,1.5,.12);box(scene,glass,cx+dx,2,cz+2.63,.8,1.25,.04);}box(scene,dark,cx,.95,cz+2.56,.9,1.9,.12);}
       const vehicleMaterials = ['#8c2829','#d2d1c5','#213d50','#434b45','#b28b45'].map(c=>mat(c,.55,.3));
       function car(index: number, bike = false) {
         const g = new T.Group(); const paint = vehicleMaterials[index%vehicleMaterials.length];
@@ -183,16 +170,22 @@ export default function CityGame() {
       const parked = Array.from({length:4},(_,i)=>{
         const v=car(i,i===1||i===6||i===12); v.group.position.set(i<3?6:(i%2?48:-48),0,i<3?8+i*7:-65+(i%9)*18); return v;
       });
+      const skin=mat('#c58e68'),hair=mat('#302420'),pants=mat('#273b47'),boots=mat('#302c28');
+      const capsuleGeo=new T.CapsuleGeometry(.12,.35,4,10);geometries.add(capsuleGeo);
       function person(color: string) {
-        void color; // Existing gameplay callers retain their interface.
-        const g = new T.Group();
-        const visual=cloneSkeleton(humanAsset.scene);visual.scale.setScalar(1.15);g.add(visual);
-        const mixer = new T.AnimationMixer(visual);
-        const walk = humanAsset.animations[0] ? mixer.clipAction(humanAsset.animations[0]).play() : null;
-        mixer.update(0); mixers.push(mixer); scene.add(g);
-        return { group:g, limbs: [] as InstanceType<typeof T.Mesh>[], mixer, walk };
+        const g=new T.Group(),coat=mat(color),limbs:InstanceType<typeof T.Group>[]=[];
+        const part=(parent:InstanceType<typeof T.Object3D>,material:InstanceType<typeof T.Material>,px:number,py:number,pz:number,sx:number,sy:number,sz:number)=>{const mesh=new T.Mesh(sphereGeo,material);mesh.position.set(px,py,pz);mesh.scale.set(sx,sy,sz);mesh.castShadow=mesh.receiveShadow=true;parent.add(mesh);return mesh;};
+        part(g,coat,0,1.05,0,.3,.4,.2);part(g,skin,0,1.66,.02,.24,.28,.23);
+        part(g,hair,0,1.82,-.02,.25,.15,.23);part(g,skin,0,1.64,.24,.06,.07,.07);
+        for(const side of [-1,1]){part(g,white,side*.085,1.71,.216,.055,.044,.027);part(g,dark,side*.085,1.71,.24,.023,.03,.014);part(g,skin,side*.235,1.67,0,.045,.075,.05);}
+        for(const side of [-1,1]){const leg=new T.Group();leg.position.set(side*.14,.76,0);g.add(leg);const mesh=new T.Mesh(capsuleGeo,pants);mesh.position.y=-.26;mesh.castShadow=true;leg.add(mesh);part(leg,boots,0,-.62,.065,.14,.1,.22);limbs.push(leg);}
+        for(const side of [-1,1]){const arm=new T.Group();arm.position.set(side*.34,1.28,0);g.add(arm);const mesh=new T.Mesh(capsuleGeo,coat);mesh.scale.set(.85,1,.85);mesh.position.y=-.22;mesh.castShadow=true;arm.add(mesh);part(arm,skin,0,-.49,.01,.09,.1,.085);limbs.push(arm);}
+        // Original explorer outfit; no external character download or copied game character.
+        part(g,mat('#715d40'),0,1.1,-.22,.24,.28,.13);
+        const mixer=new T.AnimationMixer(g);mixers.push(mixer);scene.add(g);
+        return {group:g,limbs,mixer,walk:null};
       }
-      const player=person('#d0b894');
+      const player=person('#23776f');
       const gun=new T.Group();player.group.add(gun);gun.position.set(.3,1.32,.3);
       box(gun,dark,0,0,.18,.12,.13,.48);box(gun,chrome,0,.025,.24,.11,.09,.36);box(gun,dark,0,-.14,0,.1,.22,.13);
       const npcs=Array.from({length:6},(_,i)=>({ ...person(['#52606b','#857564','#5b4543','#d6d0bd'][i%4]), baseX: [-75,-33,9,51,93][i%5], phase:i*7, health:100,downUntil:0 }));
@@ -313,7 +306,7 @@ export default function CityGame() {
         elapsed+=dt;frames++;
         gun.visible=(session.room?!!session.self.current?.owns_gun:saveRef.current.owns)&&active<0;
         if(reloadUntil&&elapsed>=reloadUntil){const amount=Math.min(12-saveRef.current.ammo,saveRef.current.reserve);persist({...saveRef.current,ammo:saveRef.current.ammo+amount,reserve:saveRef.current.reserve-amount});reloadUntil=0;setNotice('Reloaded.');}
-        if(currentQuality!==qualityRef.current){currentQuality=qualityRef.current;pixelRatio=Math.min(devicePixelRatio,currentQuality==='low'?.8:currentQuality==='high'?1.25:1);renderer.setPixelRatio(pixelRatio);renderer.shadowMap.enabled=currentQuality==='high';resize();}
+        if(currentQuality!==qualityRef.current){currentQuality=qualityRef.current;grass.count=currentQuality==='low'?Math.min(3500,grassCount):grassCount;pixelRatio=Math.min(devicePixelRatio,currentQuality==='low'?.8:currentQuality==='high'?1.25:1);renderer.setPixelRatio(pixelRatio);renderer.shadowMap.enabled=currentQuality!=='low';resize();}
         const k=keys.current,forward=Number(k.has('w')||k.has('arrowup'))-Number(k.has('s')||k.has('arrowdown'));
         const steering=Number(k.has('a')||k.has('arrowleft'))-Number(k.has('d')||k.has('arrowright'));
         const jailed=!!session.self.current?.jailed_until&&Date.parse(session.self.current.jailed_until)>Date.now();
@@ -357,7 +350,7 @@ export default function CityGame() {
         camera.position.lerp(desired,1-Math.exp(-dt*5));camera.lookAt(x,1.3,z);
         sun.position.set(x-50,90,z+45);sun.target.position.set(x,0,z);
         if(now-report>200){setHud({x,z,yaw,speed:Math.round(Math.abs(speed)*3.6),vehicle:driving?(parked[active].bike?'Motorcycle':'Sedan'):'',distance:Math.round(distance),nearShop:Math.hypot(x-shop.x,z-shop.z)<9,fps:Math.round(frames*1000/Math.max(1,now-reportTime))});report=now;}
-        if(now-reportTime>2000){const fps=frames*1000/(now-reportTime);if(currentQuality!=='high'&&fps<27&&pixelRatio>.7){pixelRatio=Math.max(.7,pixelRatio-.1);renderer.setPixelRatio(pixelRatio);resize();}reportTime=now;frames=0;}
+        if(now-reportTime>2000){const fps=frames*1000/(now-reportTime);if(currentQuality!=='high'&&fps<27&&pixelRatio>.7){grass.count=Math.min(3500,grassCount);renderer.shadowMap.enabled=false;pixelRatio=Math.max(.7,pixelRatio-.1);renderer.setPixelRatio(pixelRatio);resize();}reportTime=now;frames=0;}
         renderer.render(scene,camera);
       };
       camera.position.set(3,5,-5);frame=requestAnimationFrame(tick);setReady(true);
