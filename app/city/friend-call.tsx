@@ -1,0 +1,10 @@
+"use client";
+import {useEffect,useRef,useState} from "react";
+import {LiveKitRoom,VideoConference} from "@livekit/components-react";
+import {supabase} from "@/lib/supabase";
+export default function FriendCall({roomId}:{roomId:string}){
+ const [credentials,setCredentials]=useState<{token:string;serverUrl:string}|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(""),[small,setSmall]=useState(false);
+ const alive=useRef(true);useEffect(()=>{alive.current=true;return()=>{alive.current=false}},[]);
+ async function join(){if(!supabase||busy)return;setBusy(true);setError("");try{const {data}=await supabase.auth.getSession();if(!data.session)throw new Error("Sign in to ZION first.");const response=await fetch("/api/forest-call-token",{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${data.session.access_token}`},body:JSON.stringify({gameId:roomId})});const result=await response.json();if(!response.ok)throw new Error(result.error||"Call unavailable");if(alive.current)setCredentials(result);}catch(e){if(alive.current)setError(e instanceof Error?e.message:"Call unavailable")}finally{if(alive.current)setBusy(false)}}
+ return <aside className={`forest-call ${small?"forest-call-small":""}`} onKeyDown={e=>e.stopPropagation()}><div className="forest-call-heading"><strong>Squad • voice & video</strong><button onClick={()=>setSmall(!small)}>{small?"Expand":"Minimize"}</button></div>{!credentials?<><p>See and talk with the players in your room. Camera and microphone start off.</p><button disabled={busy} onClick={()=>void join()}>{busy?"Connecting…":"Join squad call"}</button></>:<LiveKitRoom token={credentials.token} serverUrl={credentials.serverUrl} connect audio={false} video={false} options={{adaptiveStream:true,dynacast:true}} onError={()=>setError("Call connection failed. Check the LiveKit configuration and retry.")} onDisconnected={()=>setCredentials(null)}><VideoConference/></LiveKitRoom>}{error&&<p role="alert">{error}</p>}</aside>
+}

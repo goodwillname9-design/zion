@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Joystick from './joystick';
+import FriendCall from './friend-call';
+import WorldPanel from './world-panel';
 import { initialSave, missions, parseSave, shop, type Save } from './game-data';
 import styles from './city.module.css';
 import { useCityOnline, type Position } from './use-city-online';
@@ -203,7 +205,7 @@ export default function CityGame() {
       const remotePlayers = new Map<string,{ human:ReturnType<typeof person>; car:ReturnType<typeof car>; bike:ReturnType<typeof car>; label:InstanceType<typeof T.Sprite>; username:string }>();
       const remoteLabel = (username:string) => {
         const c=document.createElement('canvas');c.width=512;c.height=96;const ctx=c.getContext('2d')!;
-        ctx.fillStyle='#142129dd';ctx.fillRect(0,0,512,96);ctx.font='bold 32px Arial';ctx.textAlign='center';ctx.fillStyle='#fff';ctx.fillText(username.slice(0,24),256,61,480);
+        ctx.fillStyle='#142129dd';ctx.fillRect(0,0,512,96);ctx.font='bold 32px Arial';ctx.textAlign='center';ctx.fillStyle='#fff';ctx.fillText(username.slice(0,48),256,61,480);
         const texture=new T.CanvasTexture(c);textures.push(texture);const material=new T.SpriteMaterial({map:texture,depthTest:false});materials.add(material);
         const label=new T.Sprite(material);label.scale.set(3.6,.675,1);scene.add(label);return label;
       };
@@ -323,7 +325,8 @@ export default function CityGame() {
         }
         for(const p of peerStates.current){
           let remote=remotePlayers.get(p.id);
-          if(!remote&&remotePlayers.size<12){remote={human:person('#699aab'),car:car(2),bike:car(2,true),label:remoteLabel(p.username),username:p.username};remotePlayers.set(p.id,remote);remote.human.group.position.set(p.x,0,p.z);remote.car.group.position.set(p.x,0,p.z);remote.bike.group.position.set(p.x,0,p.z);}
+          if(remote&&remote.username!==`${p.username} • ${p.role||"Explorer"}`){scene.remove(remote.label);remote.label=remoteLabel(`${p.username} • ${p.role||"Explorer"}`);remote.username=`${p.username} • ${p.role||"Explorer"}`;}
+          if(!remote&&remotePlayers.size<20){remote={human:person('#699aab'),car:car(2),bike:car(2,true),label:remoteLabel(`${p.username} • ${p.role||"Explorer"}`),username:`${p.username} • ${p.role||"Explorer"}`};remotePlayers.set(p.id,remote);remote.human.group.position.set(p.x,0,p.z);remote.car.group.position.set(p.x,0,p.z);remote.bike.group.position.set(p.x,0,p.z);}
           if(!remote)continue;
           const object=p.vehicle==='Sedan'?remote.car.group:p.vehicle==='Motorcycle'?remote.bike.group:remote.human.group;
           object.visible=p.hp>0;desired.set(p.x,0,p.z);object.position.lerp(desired,1-Math.exp(-dt*9));object.rotation.y=p.yaw;
@@ -359,7 +362,7 @@ export default function CityGame() {
       {online.room&&online.self.current?.hp===0&&<p className={styles.notice}>Downed · automatic respawn in 5 seconds</p>}
       <div className={styles.crosshair} aria-hidden="true">+</div>
       <section className={styles.quest}><small>CONTRACT {Math.min(save.mission+1,missions.length)} / {missions.length}</small><h1>{mission?.name||'Shift complete'}</h1><p>{mission?.brief||'All deliveries completed. Explore or practise at the range.'}</p>{mission&&<strong>{hud.distance} m <span>· ${mission.reward} reward</span></strong>}</section>
-      <aside className={styles.wallet}><b>${save.cash.toLocaleString()}</b><small>GAME MONEY</small><span>Health {health}/100</span>{online.room?<span>Ammo {online.self.current?.ammo??0} · Kills {online.self.current?.kills??0}</span>:save.owns&&<span>Ammo {save.ammo} / {save.reserve}</span>}<span>{hud.vehicle||'On foot'} · {hud.speed} km/h</span></aside>
+      <aside className={styles.wallet}><b>${save.cash.toLocaleString()}</b><small>GAME MONEY</small>{online.self.current&&<span>{online.self.current.username} · {online.self.current.role||"Explorer"}</span>}<span>Health {health}/100</span>{online.room?<span>Ammo {online.self.current?.ammo??0} · Kills {online.self.current?.kills??0}</span>:save.owns&&<span>Ammo {save.ammo} / {save.reserve}</span>}<span>{hud.vehicle||'On foot'} · {hud.speed} km/h</span></aside>
       <button className={styles.mapButton} onClick={()=>setMapOpen(!mapOpen)} aria-label="Toggle trail map">{mapOpen?'Close map':'Trail map'}</button>
       <div className={`${styles.map} ${mapOpen?styles.expanded:''}`}>
         <svg viewBox="-125 -125 250 250" role="img" aria-label="Trail map: player arrow, gold mission, S range shop">
@@ -378,7 +381,9 @@ export default function CityGame() {
       {paused&&!error&&<div className={styles.overlay}><h2>{health?"Take a breather.":"You were downed"}</h2><p>Your progress is saved on this browser.</p><button onClick={()=>health?pause(false):action.current("respawn")}>{health?"Continue":"Respawn"}</button><Link href="/">Back to ZION</Link></div>}
       <div className={styles.rotate}>↻ Rotate your phone for a wider view</div>
     </>}
-    {lobbyOpen&&<section className={styles.overlay}><h2>Forest arena with friends</h2><p>Up to 4 players · accepted friends of the host only.</p>{online.room?<><p>Room code: <strong>{online.room.code}</strong></p><button onClick={async()=>{try{await navigator.clipboard.writeText(online.room!.code);setNotice('Room code copied. Send it to your ZION friends.');}catch{setNotice('Select and copy the room code manually.');}}}>Copy room code</button>{online.round&&<><p>{online.round.active?`Round ${online.round.number} · ends ${new Date(online.round.ends_at!).toLocaleTimeString()}`:online.round.number?'Round finished':'Waiting for host'}</p><p>{[...(online.self.current?[online.self.current]:[]),...online.peers.current].sort((a,b)=>b.kills-a.kills).map(p=>`${p.username}: ${p.kills} kills`).join(' · ')}</p>{online.round.host&&!online.round.active&&<button onClick={()=>void online.command('start').then(()=>{setLobbyOpen(false);pause(false);}).catch(e=>setNotice(e.message))}>Start 3-minute round</button>}</>}<button onClick={online.leave}>Leave room</button></>:<><button disabled={online.busy} onClick={()=>online.join()}>Create private room</button><label>Friend’s room code <input value={roomCode} maxLength={16} onChange={e=>setRoomCode(e.target.value)} placeholder="16-character room code"/></label><button disabled={online.busy||roomCode.length!==16} onClick={()=>online.join(roomCode)}>Join room</button></>}<p role="status">{online.status}{online.count?` · ${online.count}/4 players`:''}</p><button onClick={()=>{setLobbyOpen(false);pause(false);}}>Back to game</button><small>First-time setup: run V63 and V68 combat SQL. Sign in through ZION first.</small></section>}
+    {online.room&&<WorldPanel key={`jobs-${online.room.id}`} roomId={online.room.id}/>}
+    {online.room&&<FriendCall key={online.room.id} roomId={online.room.id}/>}
+    {lobbyOpen&&<section className={styles.overlay}><h2>Forest arena with friends</h2><p>Join a public job world, or create a private room for friends. Up to 20 players per world.</p>{online.room?<><p>Room code: <strong>{online.room.code}</strong></p><button onClick={async()=>{try{await navigator.clipboard.writeText(online.room!.code);setNotice('Room code copied. Send it to your ZION friends.');}catch{setNotice('Select and copy the room code manually.');}}}>Copy room code</button>{online.round&&<><p>{online.round.active?`Round ${online.round.number} · ends ${new Date(online.round.ends_at!).toLocaleTimeString()}`:online.round.number?'Round finished':'Waiting for host'}</p><p>{[...(online.self.current?[online.self.current]:[]),...online.peers.current].sort((a,b)=>b.kills-a.kills).map(p=>`${p.username}: ${p.kills} kills`).join(' · ')}</p>{online.round.host&&!online.round.active&&<button onClick={()=>void online.command('start').then(()=>{setLobbyOpen(false);pause(false);}).catch(e=>setNotice(e.message))}>Start 3-minute round</button>}</>}<button onClick={online.leave}>Leave room</button></>:<><button disabled={online.busy} onClick={()=>online.join("public")}>Join public world</button><button disabled={online.busy} onClick={()=>online.join()}>Create private room</button><label>Friend’s room code <input value={roomCode} maxLength={16} onChange={e=>setRoomCode(e.target.value)} placeholder="16-character room code"/></label><button disabled={online.busy||roomCode.length!==16} onClick={()=>online.join(roomCode)}>Join room</button></>}<p role="status">{online.status}{online.count?` · ${online.count}/20 players`:''}</p><button onClick={()=>{setLobbyOpen(false);pause(false);}}>Back to game</button><small>Sign in through ZION first.</small></section>}
     {error&&<div className={styles.overlay}><p>{error}</p><button onClick={()=>location.reload()}>Reload</button><Link href="/">Back to ZION</Link></div>}
   </main>;
 }

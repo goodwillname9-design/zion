@@ -2,7 +2,7 @@
 import { useCallback,useEffect,useRef,useState } from 'react';
 import { supabase } from '@/lib/supabase';
 export type Position={x:number;z:number;yaw:number;vehicle:string};
-export type Peer=Position&{id:string;username:string;hp:number;ammo:number;kills:number;respawn_at:string|null};
+export type Peer=Position&{id:string;username:string;role?:string;hp:number;ammo:number;kills:number;respawn_at:string|null};
 type Room={id:string;code:string;user_id:string};
 type Round={number:number;ends_at:string|null;active:boolean;host:boolean};
 export function useCityOnline(position:React.RefObject<Position>){
@@ -17,7 +17,7 @@ export function useCityOnline(position:React.RefObject<Position>){
  if(currentRoom.current!==room.id)return;if(error)throw new Error(error.message);
  if(!Array.isArray(data?.players))throw new Error('Unexpected round response');
  self.current=(data.players as Peer[]).find(p=>p.id===room.user_id)??null;
- peers.current=(data.players as Peer[]).filter(p=>p.id!==room.user_id&&typeof p.username==='string'&&Number.isFinite(p.x)&&Number.isFinite(p.z)).slice(0,3);
+ peers.current=(data.players as Peer[]).filter(p=>p.id!==room.user_id&&typeof p.username==='string'&&Number.isFinite(p.x)&&Number.isFinite(p.z)).slice(0,19);
  setRound(data.round);setCount(peers.current.length+1);setStatus('Online');answer=data.message||'';
  });queue.current=task.catch(()=>{});return task.then(()=>answer);
  },[room,position]);
