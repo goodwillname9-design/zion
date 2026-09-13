@@ -86,8 +86,8 @@ export default function CityGame() {
       if (disposed || !host.current) { releaseAssets(); return; }
       cleanup=releaseAssets;
       const container = host.current;
-      const scene = new T.Scene(); scene.background = new T.Color('#9aaca0'); scene.fog = new T.Fog('#9aaca0', 38, 145);
-      const renderer = new T.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+      const scene = new T.Scene(); scene.background = new T.Color('#b9d6dc'); scene.fog = new T.Fog('#b9d6dc', 65, 185);
+      const renderer = new T.WebGLRenderer({ antialias: devicePixelRatio<=1.5, powerPreference: 'high-performance' });
       renderer.setPixelRatio(Math.min(devicePixelRatio, 1));
       renderer.shadowMap.enabled = false; renderer.shadowMap.type = T.PCFSoftShadowMap;
       renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
@@ -127,7 +127,12 @@ export default function CityGame() {
       };
       let seed = 635;
       const rand = () => { seed = (1664525 * seed + 1013904223) >>> 0; return seed / 4294967296; };
-      const earth=mat('#526343');
+      const groundCanvas=document.createElement('canvas');groundCanvas.width=groundCanvas.height=256;
+      const gc=groundCanvas.getContext('2d')!;gc.fillStyle='#66734d';gc.fillRect(0,0,256,256);
+      let textureSeed=73;const tr=()=>{textureSeed=(textureSeed*1664525+1013904223)>>>0;return textureSeed/4294967296};
+      for(let i=0;i<9000;i++){gc.fillStyle=i%2?'#889163':'#4e623d';gc.globalAlpha=.15+tr()*.2;gc.fillRect(tr()*256,tr()*256,1+tr()*3,1+tr()*2);}gc.globalAlpha=1;
+      const groundTexture=new T.CanvasTexture(groundCanvas);groundTexture.wrapS=groundTexture.wrapT=T.RepeatWrapping;groundTexture.repeat.set(45,45);groundTexture.colorSpace=T.SRGBColorSpace;groundTexture.anisotropy=Math.min(4,renderer.capabilities.getMaxAnisotropy());textures.push(groundTexture);
+      const earth=mat('#c4c8aa');earth.map=groundTexture;
       box(scene,earth,0,-.2,0,250,.4,250);
       const obstacles: { x: number; z: number; w: number; d: number }[] = [];
       const walls:InstanceType<typeof T.Mesh>[]=[];
@@ -151,6 +156,9 @@ export default function CityGame() {
       for(const [cx,cz] of [[-22,22],[65,-22],[-65,-65]]){
         walls.push(box(scene,mat('#675442'),cx,1.7,cz,6,3.4,5));box(scene,dark,cx,3.5,cz,7,.3,6);box(scene,glass,cx,1.7,cz+2.52,2,1.2,.05);obstacles.push({x:cx,z:cz,w:3.1,d:2.6});
       }
+      const hillGeo=new T.ConeGeometry(1,1,7);geometries.add(hillGeo);
+      const hills=new T.InstancedMesh(hillGeo,mat('#638777'),18);
+      for(let i=0;i<18;i++){const a=i/18*Math.PI*2;pose.position.set(Math.sin(a)*155,16,Math.cos(a)*155);pose.scale.set(30,25+(i%4)*10,32);pose.rotation.set(0,a,0);pose.updateMatrix();hills.setMatrixAt(i,pose.matrix);}hills.computeBoundingSphere();scene.add(hills);
       const vehicleMaterials = ['#8c2829','#d2d1c5','#213d50','#434b45','#b28b45'].map(c=>mat(c,.55,.3));
       function car(index: number, bike = false) {
         const g = new T.Group(); const paint = vehicleMaterials[index%vehicleMaterials.length];
@@ -216,6 +224,11 @@ export default function CityGame() {
       const targets=[-5,0,5].map(dx=>box(scene,targetMat,shop.x+dx,1.5,shop.z+12,1.4,2,.3));
       let x=3,z=3,yaw=0,speed=0,elapsed=0,last=0,frame=0,report=0,frames=0,reportTime=0,active=-1,shotUntil=0,lastShot=-1,reloadUntil=0;
       const traceGeo=new T.BufferGeometry().setFromPoints([new T.Vector3(),new T.Vector3()]);geometries.add(traceGeo);
+      for(const [name,bx,bz,color] of [['POLICE / FIRST AID',16,42,'#42738a'],['SCHOOL • 20 km/h',16,-30,'#c2a15a'],['GUN SHOP',49,7,'#665448']] as const){
+        box(scene,mat(color),bx,2,bz,6,4,5);box(scene,mat('#23333b'),bx,4.2,bz,7,.5,6);const sign=remoteLabel(name);sign.position.set(bx,5,bz);obstacles.push({x:bx,z:bz,w:3,d:2.5});
+      }
+      for(const hz of [-43,-17]){box(scene,mat('#deb643'),7,.13,hz,8,.26,1);for(let i=0;i<4;i++)box(scene,dark,4+i*2,.28,hz,.8,.04,1);}
+      const jailSign=remoteLabel('JAIL • 30 SECOND CUSTODY');jailSign.position.set(7,4,46);for(const bx of [4,10])for(let i=0;i<6;i++)box(scene,chrome,bx,1.3,44+i,.08,2.6,.08);
       const traceMat=new T.LineBasicMaterial({color:'#ffe4a0'});materials.add(traceMat);
       const trace=new T.Line(traceGeo,traceMat);trace.visible=false;scene.add(trace);
       function blocked(nx:number,nz:number,r=0.5) {return Math.abs(nx)>119||Math.abs(nz)>120||obstacles.some(o=>Math.abs(nx-o.x)<o.w+r&&Math.abs(nz-o.z)<o.d+r);}
@@ -227,7 +240,7 @@ export default function CityGame() {
 
         if(pausedRef.current)return;
         if(liveOnline.current.room && ['fire','reload','shop'].includes(name)){
-          if(name==='shop'){setNotice('Online rounds use server ammo. Reload to refill.');return;}
+          if(name==='shop'){setNotice('Open Jobs & world chat → Life & town services to buy a gun at S.');return;}
           if(name==='fire'){if(elapsed-lastShot<.3)return;lastShot=elapsed;}
           void liveOnline.current.command(name).then(message=>{if(message)setNotice(message);}).catch(e=>setNotice(e.message));return;
         }
@@ -294,19 +307,21 @@ export default function CityGame() {
           const state=session.self.current;
           if(state){
             hp=state.hp; if(now-report>200)setHealth(hp);
-            if(Math.hypot(x-state.x,z-state.z)>8){x=state.x;z=state.z;speed=0;active=-1;}
+            if((state.jailed_until&&Date.parse(state.jailed_until)>Date.now())||Math.hypot(x-state.x,z-state.z)>8){x=state.x;z=state.z;speed=0;active=-1;}
           }
         }else if(hp<=0){pause(true);return;}
         elapsed+=dt;frames++;
-        gun.visible=(saveRef.current.owns||!!session.room)&&active<0;
+        gun.visible=(session.room?!!session.self.current?.owns_gun:saveRef.current.owns)&&active<0;
         if(reloadUntil&&elapsed>=reloadUntil){const amount=Math.min(12-saveRef.current.ammo,saveRef.current.reserve);persist({...saveRef.current,ammo:saveRef.current.ammo+amount,reserve:saveRef.current.reserve-amount});reloadUntil=0;setNotice('Reloaded.');}
         if(currentQuality!==qualityRef.current){currentQuality=qualityRef.current;pixelRatio=Math.min(devicePixelRatio,currentQuality==='low'?.8:currentQuality==='high'?1.25:1);renderer.setPixelRatio(pixelRatio);renderer.shadowMap.enabled=currentQuality==='high';resize();}
         const k=keys.current,forward=Number(k.has('w')||k.has('arrowup'))-Number(k.has('s')||k.has('arrowdown'));
         const steering=Number(k.has('a')||k.has('arrowleft'))-Number(k.has('d')||k.has('arrowright'));
-        const driving=active>=0, max=session.room&&hp<=0?0:driving?(parked[active].bike?20:24):(k.has('shift')?6:3.4);
+        const jailed=!!session.self.current?.jailed_until&&Date.parse(session.self.current.jailed_until)>Date.now();
+        const driving=active>=0, max=(session.room&&hp<=0)||jailed?0:driving?(parked[active].bike?20:24):(k.has('shift')?6:3.4);
+        if(driving&&Math.abs(x-7)<5&&[-43,-17].some(h=>Math.abs(z-h)<2))speed*=Math.exp(-dt*6);
         speed+=(forward*max-speed)*Math.min(1,dt*(driving?1.4:10));if(k.has(' '))speed*=Math.exp(-dt*8);
         if(driving)yaw+=steering*dt*1.4*Math.min(1,Math.abs(speed)/3)*Math.sign(speed);
-        const strafe=driving||hp<=0?0:steering*(k.has('shift')?6:3.4)*dt;
+        const strafe=driving||hp<=0||jailed?0:steering*(k.has('shift')?6:3.4)*dt;
         const nx=x+Math.sin(yaw)*speed*dt-Math.cos(yaw)*strafe,nz=z+Math.cos(yaw)*speed*dt+Math.sin(yaw)*strafe;
         if(!blocked(nx,nz,driving?1.6:.5)){x=nx;z=nz;}else speed=0;
         player.group.position.set(x,driving?.3:0,z);player.group.rotation.y=yaw;player.group.visible=!driving||parked[active].bike;
@@ -331,7 +346,7 @@ export default function CityGame() {
           const object=p.vehicle==='Sedan'?remote.car.group:p.vehicle==='Motorcycle'?remote.bike.group:remote.human.group;
           object.visible=p.hp>0;desired.set(p.x,0,p.z);object.position.lerp(desired,1-Math.exp(-dt*9));object.rotation.y=p.yaw;
           remote.label.visible=p.hp>0;remote.label.position.copy(object.position);remote.label.position.y=3;
-          remote.human.mixer.update(dt);
+          if(Math.hypot(p.x-x,p.z-z)<55)remote.human.mixer.update(dt);
           remote.human.limbs.forEach((l,i)=>l.rotation.x=Math.sin(elapsed*8+i%2*Math.PI)*.25);
         }
         const m=missions[saveRef.current.mission];marker.visible=!!m;
@@ -357,7 +372,7 @@ export default function CityGame() {
     onPointerMove={e=>{if(aim.current?.id===e.pointerId){action.current(`look:${e.clientX-aim.current.x}`);aim.current.x=e.clientX;}}}
     onPointerUp={()=>{aim.current=null;}} onPointerCancel={()=>{aim.current=null;}}>
     <div ref={host} className={styles.world}/>
-    <header className={styles.header}><Link href="/">← ZION</Link><span>ZION STORY <small>FOREST OUTPOST</small></span><div><button onClick={()=>{setLobbyOpen(!lobbyOpen);pause(!lobbyOpen);}}>Friends {online.count||''}</button><button onClick={fullscreen}>Fullscreen</button>{started&&<button onClick={()=>pause(!paused)}>{paused?'Resume':'Pause'}</button>}</div></header>
+    <header className={styles.header}><Link href="/">← ZION</Link><span>ZION STORY <small>FOREST OUTPOST</small></span><div>{online.room&&<button onClick={()=>{const panel=document.getElementById("zion-career-panel") as HTMLDetailsElement|null;if(panel)panel.open=!panel.open;}}>Choose job</button>}<button onClick={()=>{setLobbyOpen(!lobbyOpen);pause(!lobbyOpen);}}>Friends {online.count||''}</button><button onClick={fullscreen}>Fullscreen</button>{started&&<button onClick={()=>pause(!paused)}>{paused?'Resume':'Pause'}</button>}</div></header>
     {!started?<section className={styles.intro}><small>AN ORIGINAL CITY ADVENTURE</small><h1>Your next<br/><em>shift starts here.</em></h1><p>Explore a forest trails and outposts. Drive, deliver and discover.<br/>Collect the rifle crate near spawn, explore and complete nine missions. Avoid hostile patrols.</p><button onClick={()=>{setStarted(true);pause(false);}}>Enter Forest Outpost →</button><p className={styles.disclaimer}>Original forest arena • Lightweight prototype environment and animated sample character.<br/>Progress saves on this browser. No real-money purchases. <a href="/game-assets/credits.txt" target="_blank" rel="noreferrer">Asset credits</a></p></section>:<>
       {online.room&&online.self.current?.hp===0&&<p className={styles.notice}>Downed · automatic respawn in 5 seconds</p>}
       <div className={styles.crosshair} aria-hidden="true">+</div>

@@ -2,7 +2,7 @@
 import { useCallback,useEffect,useRef,useState } from 'react';
 import { supabase } from '@/lib/supabase';
 export type Position={x:number;z:number;yaw:number;vehicle:string};
-export type Peer=Position&{id:string;username:string;role?:string;hp:number;ammo:number;kills:number;respawn_at:string|null};
+export type Peer=Position&{id:string;username:string;role?:string;jailed_until?:string|null;owns_gun?:boolean;hp:number;ammo:number;kills:number;respawn_at:string|null};
 type Room={id:string;code:string;user_id:string};
 type Round={number:number;ends_at:string|null;active:boolean;host:boolean};
 export function useCityOnline(position:React.RefObject<Position>){
