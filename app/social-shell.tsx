@@ -3238,6 +3238,8 @@ function FriendChat({
   const recorderChunksRef = useRef<Blob[]>([]);
   const messageHoldRef = useRef<number | null>(null);
   const viewOnceTimerRef = useRef<number | null>(null);
+  const openingOnceRef = useRef(false);
+  const [openingOnceId, setOpeningOnceId] = useState<number | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -3779,43 +3781,52 @@ function FriendChat({
     }
   };
   const openViewOnce = async (item: FriendMessage) => {
-    if (!supabase || item.sender_id === user.id || item.viewed_at) return;
-    if (!item.media_path) return alert("This photo is no longer available.");
+    if (!supabase || openingOnceRef.current || item.sender_id === user.id || item.viewed_at) return;
+    if (!item.media_path) return alert("This media is no longer available.");
+    openingOnceRef.current = true;
+    setOpeningOnceId(item.id);
+    let delivered = false;
     try {
-      const decryptedMetadata = await decryptText(
-        item.message,
-        user.id,
-        friendId,
-        `friend:${friendship.id}`,
-      );
-      const metadata = JSON.parse(decryptedMetadata ?? "{}") as { mime?: string };
-      const {data:session}=await supabase.auth.getSession();
-      const response=await fetch('/api/view-once',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.session?.access_token??''}`},body:JSON.stringify({id:item.id}),cache:'no-store'});
-      if (!response.ok) throw new Error("Photo download failed");
-      const blob = item.encrypted
-        ? await decryptFile(
-            await response.arrayBuffer(),
-            metadata.mime ?? "image/jpeg",
-            user.id,
-            friendId,
-            `friend:${friendship.id}`,
-          )
-        : await response.blob();
+      const encrypted = isE2EEEnvelope(item.message);
+      let metadata: { mime?: string } = {};
+      if (encrypted) {
+        const decrypted = await decryptText(item.message, user.id, friendId, `friend:${friendship.id}`);
+        try { metadata = JSON.parse(decrypted ?? "{}"); } catch { throw new Error("[ONCE_KEY] This device cannot unlock this media. Sign in again using your existing password. No opening request was sent."); }
+        if (!metadata.mime) throw new Error("[ONCE_METADATA] Media details could not be unlocked. Ask the sender to send it again.");
+      }
+      let { data: { session } } = await supabase.auth.getSession();
+      if (!session || (session.expires_at ?? 0) * 1000 < Date.now() + 60000) {
+        const refreshed = await supabase.auth.refreshSession();
+        if (refreshed.error || !refreshed.data.session) throw new Error("[ONCE_LOGIN] Sign in again, then open this media.");
+        session = refreshed.data.session;
+      }
+      const response = await fetch('/api/view-once', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ id: item.id }), cache: 'no-store' });
+      if (!response.ok) {
+        const failure = await response.json().catch(() => null);
+        throw new Error(`[${failure?.code || `ONCE_HTTP_${response.status}`}] ${failure?.error || 'Media delivery failed. Ask the ZION owner to check this code.'}`);
+      }
+      delivered = true;
+      const blob = encrypted ? await decryptFile(await response.arrayBuffer(), metadata.mime!, user.id, friendId, `friend:${friendship.id}`) : await response.blob();
       const mediaUrl = URL.createObjectURL(blob);
       mediaUrlsRef.current.set(item.media_path, mediaUrl);
       item = { ...item, media_url: mediaUrl, viewed_at: new Date().toISOString() };
-    } catch {
+      setOpenedOnceIds(current => [...new Set([...current, item.id])]);
+      setMediaPreview(item);
+      if (viewOnceTimerRef.current) window.clearTimeout(viewOnceTimerRef.current);
+      viewOnceTimerRef.current = window.setTimeout(() => {
+        URL.revokeObjectURL(mediaUrl);
+        if (item.media_path) mediaUrlsRef.current.delete(item.media_path);
+        setMediaPreview(null);
+        setOpenedOnceIds(current => current.filter(id => id !== item.id));
+        void load();
+      }, item.media_type === "video" ? 300_000 : 10_000);
+    } catch (problem) {
       void load();
-      return alert("This view-once photo could not be opened.");
+      alert(delivered ? "[ONCE_DECRYPT] Delivery was consumed, but this device could not open the file. Ask the sender to send it again." : problem instanceof Error ? problem.message : "[ONCE_NETWORK] Media could not be opened. Check your connection.");
+    } finally {
+      openingOnceRef.current = false;
+      setOpeningOnceId(null);
     }
-    setOpenedOnceIds((current) => [...new Set([...current, item.id])]);
-    setMediaPreview(item);
-    if (viewOnceTimerRef.current) window.clearTimeout(viewOnceTimerRef.current);
-    viewOnceTimerRef.current = window.setTimeout(() => {
-      setMediaPreview(null);
-      setOpenedOnceIds((current) => current.filter((id) => id !== item.id));
-      void load();
-    }, item.media_type==="video"?300_000:10_000);
   };
   const closeMediaPreview = () => {
     if (viewOnceTimerRef.current) window.clearTimeout(viewOnceTimerRef.current);
@@ -4194,12 +4205,12 @@ function FriendChat({
                 !openedOnceIds.includes(item.id) ? (
                   <button
                     className="view-once-button"
-                    disabled={Boolean(item.viewed_at)}
+                    disabled={Boolean(item.viewed_at) || openingOnceId !== null}
                     onClick={() => void openViewOnce(item)}
                   >
                     {item.viewed_at
                       ? "Media already opened"
-                      : "Open media once"}
+                      : openingOnceId === item.id ? "Opening…" : "Open media once"}
                   </button>
                 ) : null}
                 {!item.deleted_at &&
