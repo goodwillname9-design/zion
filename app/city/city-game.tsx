@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Joystick from './joystick';
+import KeralaGuide from './kerala-guide';
 import FriendCall from './friend-call';
 import WorldPanel from './world-panel';
 import { initialSave, missions, parseSave, shop, type Save } from './game-data';
@@ -109,6 +110,10 @@ export default function CityGame() {
       const groundTexture=new T.CanvasTexture(groundCanvas);groundTexture.wrapS=groundTexture.wrapT=T.RepeatWrapping;groundTexture.repeat.set(45,45);groundTexture.colorSpace=T.SRGBColorSpace;groundTexture.anisotropy=Math.min(4,renderer.capabilities.getMaxAnisotropy());textures.push(groundTexture);
       const earth=mat('#9ba779');earth.map=groundTexture;
       box(scene,earth,0,-.2,0,250,.4,250);
+      const sea=mat('#328d9d',.15,.3);box(scene,sea,-200,-.22,0,145,.12,360);
+      const sand=mat('#d9c49a');box(scene,sand,-123,-.1,0,8,.12,250);
+      const palmTrunk=mat('#795940'),palmLeaf=mat('#367f50');
+      for(let i=0;i<20;i++){const px=-121,pz=-110+i*11;box(scene,palmTrunk,px,3,pz,.35,6,.35);for(let j=0;j<5;j++){const leaf=box(scene,palmLeaf,px+Math.cos(j*1.256)*1.5,6,pz+Math.sin(j*1.256)*1.5,3,.12,.7);leaf.rotation.y=-j*1.256;leaf.rotation.z=.15;}}
       const obstacles: { x: number; z: number; w: number; d: number }[] = [];
       const walls:InstanceType<typeof T.Mesh>[]=[];
       const trail=mat('#8a7758');
@@ -227,8 +232,9 @@ export default function CityGame() {
       function blocked(nx:number,nz:number,r=0.5) {return Math.abs(nx)>119||Math.abs(nz)>120||obstacles.some(o=>Math.abs(nx-o.x)<o.w+r&&Math.abs(nz-o.z)<o.d+r);}
       const clear=()=>keys.current.clear();
       let hp=100,lastDamage=-5;
-      const loot=[{x:3,z:7,kind:'weapon'},{x:42,z:35,kind:'medical'},{x:-42,z:-42,kind:'medical'}].map(p=>({...p,mesh:box(scene,mat(p.kind==='weapon'?'#b5984c':'#ab534f'),p.x,.45,p.z,.8,.9,.8),used:false}));
+      
       action.current=(name)=>{
+        if(['fire','reload','shop','start'].includes(name))return;
         if(name==='respawn'){hp=100;setHealth(100);x=3;z=3;active=-1;speed=0;lastDamage=elapsed;pause(false);return;}
 
         if(pausedRef.current)return;
@@ -304,7 +310,7 @@ export default function CityGame() {
           }
         }else if(hp<=0){pause(true);return;}
         elapsed+=dt;frames++;
-        gun.visible=(session.room?!!session.self.current?.owns_gun:saveRef.current.owns)&&active<0;
+        gun.visible=false;
         if(reloadUntil&&elapsed>=reloadUntil){const amount=Math.min(12-saveRef.current.ammo,saveRef.current.reserve);persist({...saveRef.current,ammo:saveRef.current.ammo+amount,reserve:saveRef.current.reserve-amount});reloadUntil=0;setNotice('Reloaded.');}
         if(currentQuality!==qualityRef.current){currentQuality=qualityRef.current;grass.count=currentQuality==='low'?Math.min(3500,grassCount):grassCount;pixelRatio=Math.min(devicePixelRatio,currentQuality==='low'?.8:currentQuality==='high'?1.25:1);renderer.setPixelRatio(pixelRatio);renderer.shadowMap.enabled=currentQuality!=='low';resize();}
         const k=keys.current,forward=Number(k.has('w')||k.has('arrowup'))-Number(k.has('s')||k.has('arrowdown'));
@@ -322,8 +328,6 @@ export default function CityGame() {
         player.limbs.forEach((l,i)=>l.rotation.x=driving?0:Math.sin(elapsed*10+i%2*Math.PI)*Math.min(.45,Math.abs(speed)*.12));
         if(driving){const v=parked[active];v.group.position.set(x,0,z);v.group.rotation.y=yaw;v.wheels.forEach(w=>w.rotation.x+=speed*dt*2);}
         npcs.forEach((p,i)=>{if(p.group.visible)p.mixer.update(dt);if(p.health<=0&&elapsed>=p.downUntil)p.health=100;p.group.visible=!session.room&&p.health>0;const t=(elapsed*1.2+p.phase)%165-70;p.group.position.set(p.baseX,0,t);p.limbs.forEach((l,j)=>l.rotation.x=Math.sin(elapsed*6+j%2*Math.PI+i)*.4);});
-        for(const drop of loot)if(!session.room&&!drop.used&&Math.hypot(x-drop.x,z-drop.z)<2.5){drop.used=true;drop.mesh.visible=false;if(drop.kind==='weapon'){persist({...saveRef.current,owns:true,ammo:12,reserve:60});setNotice('Rifle collected. Drag the scene to aim; F / Fire to shoot.');}else{hp=Math.min(100,hp+45);setHealth(hp);setNotice('Medical supplies collected.');}}
-        if(!session.room&&active<0&&elapsed-lastDamage>2&&npcs.some(p=>p.health>0&&p.group.position.distanceTo(player.group.position)<4)){hp=Math.max(0,hp-10);lastDamage=elapsed;setHealth(hp);setNotice('Hostile patrol nearby! Move away or defend yourself.');if(!hp)pause(true);}
         animals.forEach((a,i)=>{a.group.position.z=a.pz+Math.sin(elapsed*.1+i)*2;a.group.rotation.y=Math.cos(elapsed*.1+i)>0?0:Math.PI;a.legs.forEach((leg,j)=>leg.rotation.x=Math.sin(elapsed*3+j*Math.PI/2)*.16);});
         traffic.forEach((v,i)=>{const tz=(elapsed*(6+i%3)+v.offset)%230-115;v.group.position.set(v.lane,0,tz);v.wheels.forEach(w=>w.rotation.x+=dt*12);});
         networkPosition.current={x,z,yaw,vehicle:driving?(parked[active].bike?'Motorcycle':'Sedan'):''};
@@ -365,33 +369,34 @@ export default function CityGame() {
     onPointerMove={e=>{if(aim.current?.id===e.pointerId){action.current(`look:${e.clientX-aim.current.x}`);aim.current.x=e.clientX;}}}
     onPointerUp={()=>{aim.current=null;}} onPointerCancel={()=>{aim.current=null;}}>
     <div ref={host} className={styles.world}/>
-    <header className={styles.header}><Link href="/">← ZION</Link><span>ZION STORY <small>FOREST OUTPOST</small></span><div>{online.room&&<button onClick={()=>{const panel=document.getElementById("zion-career-panel") as HTMLDetailsElement|null;if(panel)panel.open=!panel.open;}}>Choose job</button>}<button onClick={()=>{setLobbyOpen(!lobbyOpen);pause(!lobbyOpen);}}>Friends {online.count||''}</button><button onClick={fullscreen}>Fullscreen</button>{started&&<button onClick={()=>pause(!paused)}>{paused?'Resume':'Pause'}</button>}</div></header>
-    {!started?<section className={styles.intro}><small>AN ORIGINAL CITY ADVENTURE</small><h1>Your next<br/><em>shift starts here.</em></h1><p>Explore a forest trails and outposts. Drive, deliver and discover.<br/>Collect the rifle crate near spawn, explore and complete nine missions. Avoid hostile patrols.</p><button onClick={()=>{setStarted(true);pause(false);}}>Enter Forest Outpost →</button><p className={styles.disclaimer}>Original forest arena • Lightweight prototype environment and animated sample character.<br/>Progress saves on this browser. No real-money purchases. <a href="/game-assets/credits.txt" target="_blank" rel="noreferrer">Asset credits</a></p></section>:<>
+    <KeralaGuide />
+    <header className={styles.header}><Link href="/">← ZION</Link><span>ZION STORY <small>KERALA SOCIAL WORLD</small></span><div>{online.room&&<button onClick={()=>{const panel=document.getElementById("zion-career-panel") as HTMLDetailsElement|null;if(panel)panel.open=!panel.open;}}>Choose job</button>}<button onClick={()=>{setLobbyOpen(!lobbyOpen);pause(!lobbyOpen);}}>Friends {online.count||''}</button><button onClick={fullscreen}>Fullscreen</button>{started&&<button onClick={()=>pause(!paused)}>{paused?'Resume':'Pause'}</button>}</div></header>
+    {!started?<section className={styles.intro}><small>MEET • EXPLORE • CONNECT</small><h1>Your next<br/><em>shift starts here.</em></h1><p>Explore a Kerala-inspired village, drive the trails and meet friends.<br/>Join a world for text chat and optional voice/video. No combat.</p><button onClick={()=>{setStarted(true);pause(false);}}>Explore together →</button><p className={styles.disclaimer}>Kerala-inspired scenery • See the Kerala guide for real destinations. This playable area is not an exact geographic map.<br/>Progress saves on this browser. No real-money purchases. <a href="/game-assets/credits.txt" target="_blank" rel="noreferrer">Asset credits</a></p></section>:<>
       {online.room&&online.self.current?.hp===0&&<p className={styles.notice}>Downed · automatic respawn in 5 seconds</p>}
-      <div className={styles.crosshair} aria-hidden="true">+</div>
-      <section className={styles.quest}><small>CONTRACT {Math.min(save.mission+1,missions.length)} / {missions.length}</small><h1>{mission?.name||'Shift complete'}</h1><p>{mission?.brief||'All deliveries completed. Explore or practise at the range.'}</p>{mission&&<strong>{hud.distance} m <span>· ${mission.reward} reward</span></strong>}</section>
-      <aside className={styles.wallet}><b>${save.cash.toLocaleString()}</b><small>GAME MONEY</small>{online.self.current&&<span>{online.self.current.username} · {online.self.current.role||"Explorer"}</span>}<span>Health {health}/100</span>{online.room?<span>Ammo {online.self.current?.ammo??0} · Kills {online.self.current?.kills??0}</span>:save.owns&&<span>Ammo {save.ammo} / {save.reserve}</span>}<span>{hud.vehicle||'On foot'} · {hud.speed} km/h</span></aside>
+      
+      <section className={styles.quest}><small>CONTRACT {Math.min(save.mission+1,missions.length)} / {missions.length}</small><h1>{mission?.name||'Shift complete'}</h1><p>{mission?.brief||'All deliveries completed. Explore and meet friends.'}</p>{mission&&<strong>{hud.distance} m <span>· ${mission.reward} reward</span></strong>}</section>
+      <aside className={styles.wallet}><b>${save.cash.toLocaleString()}</b><small>GAME MONEY</small>{online.self.current&&<span>{online.self.current.username} · {online.self.current.role||"Explorer"}</span>}<span>Health {health}/100</span><span>{hud.vehicle||'On foot'} · {hud.speed} km/h</span></aside>
       <button className={styles.mapButton} onClick={()=>setMapOpen(!mapOpen)} aria-label="Toggle trail map">{mapOpen?'Close map':'Trail map'}</button>
       <div className={`${styles.map} ${mapOpen?styles.expanded:''}`}>
         <svg viewBox="-125 -125 250 250" role="img" aria-label="Trail map: player arrow, gold mission, S range shop">
           <rect x="-125" y="-125" width="250" height="250" fill="#2f4633"/>
           {[-84,-42,0,42,84].map(v=><g key={v} stroke="#657475" strokeWidth="9"><path d={`M ${v} -125 V 125`}/><path d={`M -125 ${v} H 125`}/></g>)}
-          <rect x="-125" y="-125" width="250" height="45" fill="#465d3d"/><text x="0" y="-108" fontSize="10" textAnchor="middle" fill="#302e28">NORTH RIDGE</text><text x="-35" y="60" fontSize="9" fill="#d7d1bc">FOREST OUTPOST</text><path d="M -125 121 H 125" stroke="#465d3d" strokeWidth="8"/>
+          <rect x="-125" y="-125" width="250" height="45" fill="#465d3d"/><text x="0" y="-108" fontSize="10" textAnchor="middle" fill="#302e28">NORTH RIDGE</text><text x="-35" y="60" fontSize="9" fill="#d7d1bc">KERALA SOCIAL WORLD</text><path d="M -125 121 H 125" stroke="#465d3d" strokeWidth="8"/>
           <circle cx={shop.x} cy={shop.z} r="8" fill="#91c9b3"/><text x={shop.x} y={shop.z+4} fontSize="11" textAnchor="middle" fill="#122322">S</text>
           {mission&&<circle cx={mission.x} cy={mission.z} r="5" fill="#efc489"/>}
           <path d="M 0 7 L -4 -4 L 0 -2 L 4 -4 Z" fill="white" transform={`translate(${hud.x} ${hud.z}) rotate(${-hud.yaw*180/Math.PI})`}/>
         </svg><small>YOU △ · MISSION ● · SHOP S</small>
       </div>
-      <p className={styles.notice} role="status">{notice||'Drag: aim · WASD/arrows: move · E: vehicle · F: fire · R: reload'}</p>
-      <div className={styles.controls}><Joystick onMove={(x,y)=>{for(const [key,pressed] of [['w',y<-.2],['s',y>.2],['a',x<-.2],['d',x>.2]] as const){if(pressed)keys.current.add(key);else keys.current.delete(key);}}}/><div className={styles.actions}><button onClick={()=>action.current('vehicle')}>{hud.vehicle?'Exit':'Enter vehicle'}</button>{hold(hud.vehicle?' ':'shift',hud.vehicle?'Brake':'Run')}<button onClick={()=>action.current('shop')}>{save.owns?'Ammo at S':'Gun $300'}</button>{(save.owns||online.room)&&<><button onClick={()=>action.current('fire')}>Fire</button><button onClick={()=>action.current('reload')}>Reload</button></>}</div></div>
-      <footer className={styles.footer}><span>{online.status} · {save.hits} target hits</span><label>Graphics <select value={quality} onChange={e=>{qualityRef.current=e.target.value;setQuality(e.target.value);}}><option value="balanced">Balanced</option><option value="low">Performance</option><option value="high">High detail</option></select></label></footer>
-      {!ready&&!error&&<div className={styles.overlay}>Loading Forest Outpost models…</div>}
+      <p className={styles.notice} role="status">{notice||'Drag: look around · WASD/arrows: move · E: vehicle'}</p>
+      <div className={styles.controls}><Joystick onMove={(x,y)=>{for(const [key,pressed] of [['w',y<-.2],['s',y>.2],['a',x<-.2],['d',x>.2]] as const){if(pressed)keys.current.add(key);else keys.current.delete(key);}}}/><div className={styles.actions}><button onClick={()=>action.current('vehicle')}>{hud.vehicle?'Exit':'Enter vehicle'}</button>{hold(hud.vehicle?' ':'shift',hud.vehicle?'Brake':'Run')}</div></div>
+      <footer className={styles.footer}><span>{online.status}</span><label>Graphics <select value={quality} onChange={e=>{qualityRef.current=e.target.value;setQuality(e.target.value);}}><option value="balanced">Balanced</option><option value="low">Performance</option><option value="high">High detail</option></select></label></footer>
+      {!ready&&!error&&<div className={styles.overlay}>Loading Kerala social world…</div>}
       {paused&&!error&&<div className={styles.overlay}><h2>{health?"Take a breather.":"You were downed"}</h2><p>Your progress is saved on this browser.</p><button onClick={()=>health?pause(false):action.current("respawn")}>{health?"Continue":"Respawn"}</button><Link href="/">Back to ZION</Link></div>}
       <div className={styles.rotate}>↻ Rotate your phone for a wider view</div>
     </>}
     {online.room&&<WorldPanel key={`jobs-${online.room.id}`} roomId={online.room.id}/>}
     {online.room&&<FriendCall key={online.room.id} roomId={online.room.id}/>}
-    {lobbyOpen&&<section className={styles.overlay}><h2>Forest arena with friends</h2><p>Join a public job world, or create a private room for friends. Up to 20 players per world.</p>{online.room?<><p>Room code: <strong>{online.room.code}</strong></p><button onClick={async()=>{try{await navigator.clipboard.writeText(online.room!.code);setNotice('Room code copied. Send it to your ZION friends.');}catch{setNotice('Select and copy the room code manually.');}}}>Copy room code</button>{online.round&&<><p>{online.round.active?`Round ${online.round.number} · ends ${new Date(online.round.ends_at!).toLocaleTimeString()}`:online.round.number?'Round finished':'Waiting for host'}</p><p>{[...(online.self.current?[online.self.current]:[]),...online.peers.current].sort((a,b)=>b.kills-a.kills).map(p=>`${p.username}: ${p.kills} kills`).join(' · ')}</p>{online.round.host&&!online.round.active&&<button onClick={()=>void online.command('start').then(()=>{setLobbyOpen(false);pause(false);}).catch(e=>setNotice(e.message))}>Start 3-minute round</button>}</>}<button onClick={online.leave}>Leave room</button></>:<><button disabled={online.busy} onClick={()=>online.join("public")}>Join public world</button><button disabled={online.busy} onClick={()=>online.join()}>Create private room</button><label>Friend’s room code <input value={roomCode} maxLength={16} onChange={e=>setRoomCode(e.target.value)} placeholder="16-character room code"/></label><button disabled={online.busy||roomCode.length!==16} onClick={()=>online.join(roomCode)}>Join room</button></>}<p role="status">{online.status}{online.count?` · ${online.count}/20 players`:''}</p><button onClick={()=>{setLobbyOpen(false);pause(false);}}>Back to game</button><small>Sign in through ZION first.</small></section>}
+    {lobbyOpen&&<section className={styles.overlay}><h2>Meet friends in Kerala</h2><p>Join a public job world, or create a private room for friends. Up to 20 players per world.</p>{online.room?<><p>Room code: <strong>{online.room.code}</strong></p><button onClick={async()=>{try{await navigator.clipboard.writeText(online.room!.code);setNotice('Room code copied. Send it to your ZION friends.');}catch{setNotice('Select and copy the room code manually.');}}}>Copy room code</button><button onClick={online.leave}>Leave room</button></>:<><button disabled={online.busy} onClick={()=>online.join("public")}>Join public world</button><button disabled={online.busy} onClick={()=>online.join()}>Create private room</button><label>Friend’s room code <input value={roomCode} maxLength={16} onChange={e=>setRoomCode(e.target.value)} placeholder="16-character room code"/></label><button disabled={online.busy||roomCode.length!==16} onClick={()=>online.join(roomCode)}>Join room</button></>}<p role="status">{online.status}{online.count?` · ${online.count}/20 players`:''}</p><button onClick={()=>{setLobbyOpen(false);pause(false);}}>Back to game</button><small>Sign in through ZION first.</small></section>}
     {error&&<div className={styles.overlay}><p>{error}</p><button onClick={()=>location.reload()}>Reload</button><Link href="/">Back to ZION</Link></div>}
   </main>;
 }

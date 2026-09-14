@@ -1,4 +1,5 @@
 "use client";
+import MessageLinks from "./message-links";
 
 import DeviceSessions from "./device-sessions";
 import PublicFeed from "./public-feed";
@@ -1405,6 +1406,8 @@ function FriendsPanel({
     mode: "followers" | "following";
   } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [reelsPanel,setReelsPanel]=useState(false);
+  const [updatesPanel,setUpdatesPanel]=useState(false);
   const [activeTab, setActiveTab] = useState<
     | "friends"
     | "notifications"
@@ -2128,6 +2131,8 @@ function FriendsPanel({
         </section>
       </div>
     );
+  if(reelsPanel)return <ZionReels user={user} onClose={()=>setReelsPanel(false)}/>;
+  if(updatesPanel)return <PublicFeed user={user} isAdmin={profile.is_admin} onClose={()=>setUpdatesPanel(false)}/>;
   return (
     <div className="social-overlay">
       <section className="friends-panel">
@@ -2152,43 +2157,19 @@ function FriendsPanel({
             <ArrowLeft /> <span>Back</span>
           </button>
         </header>
-        <div className="friends-tabs">
-          {profile.is_admin ? (
-            <button
-              className={
-                activeTab === "admin" ? "active admin-tab" : "admin-tab"
-              }
-              onClick={() => setActiveTab("admin")}
-            >
-              <ShieldAlert /> Admin
-            </button>
-          ) : null}
-          <button
-            className={activeTab === "friends" ? "active" : ""}
-            onClick={() => setActiveTab("friends")}
-          >
-            <Users /> Friends
-          </button>
-          <button
-            className={activeTab === "find" ? "active" : ""}
-            onClick={() => setActiveTab("find")}
-          >
-            <Search /> Find Friends
-          </button>
-          <button
-            className={activeTab === "games" ? "active game-tab" : "game-tab"}
-            onClick={() => setActiveTab("games")}
-          >
-            <Gamepad2 /> Games
-          </button>
-          <button
-            className="meeting-tab"
-            onClick={() => {
-              window.location.href = "/meeting";
-            }}
-          >
-            <Video /> Meetings
-          </button>
+        <button className="find-friends-search" onClick={()=>setActiveTab("find")}><Search size={18}/> Find friends by username</button>
+        <nav className="friends-tabs" aria-label="ZION sections">
+          <button onClick={()=>setUpdatesPanel(true)}><ImagePlus/>Updates</button>
+          <button className={activeTab==="friends"?"active":""} onClick={()=>setActiveTab("friends")}><Users/>Chats</button>
+          <button onClick={()=>setReelsPanel(true)}><Video/>Reels</button>
+          <button className={activeTab==="games"?"active":""} onClick={()=>setActiveTab("games")}><Gamepad2/>Games</button>
+          <button onClick={()=>setSettingsOpen(true)}><Settings/>Settings</button>
+        </nav>
+        <div className="friends-shortcuts">
+          <button onClick={()=>setActiveTab("notifications")}>Notifications</button>
+          <button onClick={()=>setActiveTab("communities")}>Communities</button>
+          <a href="/meeting">Meetings</a>
+          {profile.is_admin&&<button onClick={()=>setActiveTab("admin")}>CEO admin</button>}
         </div>
         {activeTab === "admin" ? (
           <AdminPanel user={user} />
@@ -2884,7 +2865,7 @@ function CommunityPanel({
                   preload="metadata"
                 />
               ) : null}
-              <span>{item.display_message}</span>
+              <MessageLinks text={item.display_message ?? ""} />
               <div className="message-meta"><MessageTime sentAt={item.created_at} /></div>
             </div>
           ))}
@@ -3222,9 +3203,11 @@ function FriendChat({
   const [friendTyping, setFriendTyping] = useState(false);
   const [replyTo, setReplyTo] = useState<FriendMessage | null>(null);
   const [showFriendProfile, setShowFriendProfile] = useState(false);
+  const [callMinimized,setCallMinimized]=useState(false);
   const [callState, setCallState] = useState<
     "idle" | "requesting" | "incoming" | "connecting" | "active"
   >("idle");
+  useEffect(()=>{if(callState==="idle")setCallMinimized(false);},[callState]);
   const [callError, setCallError] = useState("");
   const [callKind, setCallKind] = useState<"audio" | "video">("audio");
   const [muted, setMuted] = useState(false);
@@ -3232,6 +3215,7 @@ function FriendChat({
   const [speakerOn, setSpeakerOn] = useState(true);
   const [chatShielded, setChatShielded] = useState(false);
   const [securityNotice, setSecurityNotice] = useState("");
+  const nearBottomRef=useRef(true);
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -3479,9 +3463,9 @@ function FriendChat({
     return () => window.clearTimeout(initial);
   }, [load]);
   useEffect(() => {
-    listRef.current?.scrollTo({
+    if(nearBottomRef.current)listRef.current?.scrollTo({
       top: listRef.current.scrollHeight,
-      behavior: "smooth",
+      behavior: "auto",
     });
   }, [messages]);
   useEffect(() => {
@@ -4056,6 +4040,8 @@ function FriendChat({
             </div>
           )}
         </header>
+        <div className={callState!=="idle"&&!callMinimized?"zion-call-room":"zion-call-inline"}>
+          {callState!=="idle"&&<><button className="call-minimize" onClick={()=>setCallMinimized(!callMinimized)}>{callMinimized?"Expand call":"Back to chat"}</button><div className="call-identity"><h2>{friend?.username??"ZION friend"}</h2><p>{callState==="active"?"Connected":callState==="incoming"?"Incoming call":"Calling…"}</p>{callKind!=="video"&&<div className="call-portrait"><ProfileAvatar profile={friend}/></div>}</div></>}
         {callKind === "video" && callState !== "idle" ? (
           <div className="private-video-stage">
             <video ref={remoteVideoRef} autoPlay playsInline />
@@ -4138,6 +4124,7 @@ function FriendChat({
         {callState !== "idle" ? (
           <p className="call-security-note">Calls use encrypted WebRTC transport. Independent end-to-end encryption verification is pending.</p>
         ) : null}
+        </div>
         <div className="streak-strip">
           <span>{streakBadge(friendship.streak_count)}</span>
           <b>{friendship.streak_count} day streak</b>
@@ -4149,7 +4136,7 @@ function FriendChat({
         </div>
         {securityNotice ? <div className="chat-security-notice">{securityNotice}</div> : null}
         {chatShielded ? <div className="chat-privacy-shield">Private chat hidden</div> : null}
-        <div className="friend-message-list" ref={listRef}>
+        <div className="friend-message-list" ref={listRef} onScroll={event=>{const el=event.currentTarget;nearBottomRef.current=el.scrollHeight-el.scrollTop-el.clientHeight<100;}}>
           {!messages.length ? (
             <div className="empty-private-chat">
               <ProfileAvatar profile={friend} />
@@ -4242,7 +4229,7 @@ function FriendChat({
                 {item.deleted_at ? (
                   <span className="deleted-message">Message deleted</span>
                 ) : item.display_message ? (
-                  <span>{item.display_message}</span>
+                  <MessageLinks text={item.display_message ?? ""} />
                 ) : null}
                 <div className="message-footer">
                 {!item.deleted_at ? (
@@ -4354,7 +4341,7 @@ function FriendChat({
             placeholder={
               friendTyping
                 ? `${friend?.username ?? "Friend"} is typing…`
-                : "Message your friend…"
+                : "Message or paste a link…"
             }
             maxLength={1000}
           />

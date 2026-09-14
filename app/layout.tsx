@@ -7,9 +7,10 @@ import { PwaInstall } from "./pwa-install";
 import { LanguageSwitcher } from "./language-switcher";
 
 export const metadata: Metadata = {
-  title: "ZION",
+  metadataBase: new URL("https://zion-one-nu.vercel.app"),
+  title: "ZION — Stranger Chat, Friends & Social Games",
   description:
-    "Meet a stranger through one thoughtful question and ten honest minutes.",
+    "Meet new people on ZION, chat with friends, share photos, videos and links, and explore social games. Read our public features, privacy and safety guides.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

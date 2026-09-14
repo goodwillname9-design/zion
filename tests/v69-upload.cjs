@@ -19,7 +19,7 @@ async function check(source, expired=false) {
   }this.o.onSuccess();}catch(e){this.o.onError(e);}}
  }
  const exports={};
- vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports,require:n=>n==='tus-js-client'?{Upload}:{supabase:client},process:{env:{NEXT_PUBLIC_SUPABASE_URL:'https://test.supabase.co',NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:'sb_publishable_test'}},DOMException,Date});
+ vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports,require:n=>n==='tus-js-client'?{Upload,DetailedError:class extends Error{}}:{supabase:client},process:{env:{NEXT_PUBLIC_SUPABASE_URL:'https://test.supabase.co',NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:'sb_publishable_test'}},DOMException,Date});
  await exports.uploadResumable({bucket:'chat-media',path:'friend/test/file',body:new Blob(['test']),contentType:'application/octet-stream'});
  assert.equal(requests,2);
 }

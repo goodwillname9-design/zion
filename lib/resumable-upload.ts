@@ -6,7 +6,7 @@ export async function uploadResumable({bucket,path,body,contentType,onProgress,s
  const url=process.env.NEXT_PUBLIC_SUPABASE_URL,key=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY??process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
  if(!url||!key)throw new Error('Storage configuration is missing.');
  if(signal?.aborted)throw new DOMException('Upload cancelled','AbortError');
- let {data}=await client.auth.getSession();if(!data.session?.access_token){const refreshed=await client.auth.refreshSession();data=refreshed.data;}
+ let {data}=await client.auth.getSession();if(!data.session?.access_token){const refreshed=await client.auth.refreshSession();if(refreshed.error)throw new Error("[ZION V70 AUTH] Session refresh failed. Sign in again and retry.");data=refreshed.data;}
  let token=data.session?.access_token;if(!token)throw new Error('Sign in again before uploading.');
  // Authentication headers are set only in onBeforeRequest: XHR appends duplicate values.
  // Only one transport: never restart a cancelled/failed resumable upload as an uncancellable request.
@@ -16,8 +16,8 @@ export async function uploadResumable({bucket,path,body,contentType,onProgress,s
   const upload=new tus.Upload(body,{endpoint:`${url.replace(/\/$/,'')}/storage/v1/upload/resumable`,retryDelays:[0,1000,3000,5000,10000],headers:{'x-upsert':'false'},
    uploadDataDuringCreation:true,removeFingerprintOnSuccess:true,chunkSize:6*1024*1024,
    metadata:{bucketName:bucket,objectName:path,contentType,cacheControl:'3600'},
-   onBeforeRequest:async request=>{if(signal?.aborted)throw new DOMException('Upload cancelled','AbortError');const current=await client.auth.getSession();if((current.data.session?.expires_at??0)*1000<Date.now()+60000){const refreshed=await client.auth.refreshSession();token=refreshed.data.session?.access_token??token;}else token=current.data.session?.access_token??token;request.setHeader('authorization',`Bearer ${token}`);request.setHeader('apikey',key);},
-   onProgress:(done,total)=>{if(!settled)onProgress?.(total?Math.round(done/total*100):0);},onError:error=>finish(error),onSuccess:()=>finish()});
+   onBeforeRequest:async request=>{if(signal?.aborted)throw new DOMException('Upload cancelled','AbortError');const current=await client.auth.getSession();if((current.data.session?.expires_at??0)*1000<Date.now()+60000){const refreshed=await client.auth.refreshSession();if(refreshed.error||!refreshed.data.session?.access_token)throw new Error("[ZION V70 AUTH] Session refresh failed. Sign in again and retry.");token=refreshed.data.session.access_token;}else token=current.data.session?.access_token??token;request.setHeader('authorization',`Bearer ${token}`);request.setHeader('apikey',key);},
+   onProgress:(done,total)=>{if(!settled)onProgress?.(total?Math.round(done/total*100):0);},onError:error=>{const status=error instanceof tus.DetailedError ? error.originalResponse?.getStatus() : undefined;finish(new Error(status===401||status===403||/Invalid Compact JWS/.test(error.message)?"[ZION V70 AUTH] Storage rejected this session. Sign in again and retry. If it persists, report this code to ZION.":`[ZION V70 UPLOAD ${status??0}] Upload failed. Check your connection and retry.`));},onSuccess:()=>finish()});
   const cancel=()=>{void upload.abort(true).catch(()=>{});finish(new DOMException('Upload cancelled','AbortError'));};
   signal?.addEventListener('abort',cancel,{once:true});
   void upload.findPreviousUploads().then(previous=>{if(signal?.aborted){cancel();return;}if(previous[0])upload.resumeFromPreviousUpload(previous[0]);upload.start();}).catch(error=>finish(error));
