@@ -1,3 +1,4 @@
+import OnlineCount from "./online-count";
 import LightCord from "./light-cord";
 import type { Metadata } from "next";
 import "@fontsource-variable/montserrat";
@@ -35,6 +36,7 @@ export default function RootLayout({
       <body className="antialiased">
         {children}
         <LightCord />
+        <OnlineCount />
         <LanguageSwitcher />
         <PwaInstall />
       </body>
