@@ -1,8 +1,10 @@
 "use client";
+import dynamic from "next/dynamic";
+import {createTaskPool} from "@/lib/task-pool";
 import MessageLinks from "./message-links";
 
 import DeviceSessions from "./device-sessions";
-import PublicFeed from "./public-feed";
+const PublicFeed = dynamic(()=>import("./public-feed"));
 import MessageTime from "./message-time";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -65,8 +67,9 @@ import {
 import { Experience, type ZionProfile } from "./experience";
 import { countryLabel, countryOptions } from "./countries";
 import { uploadResumable } from "@/lib/resumable-upload";
-import { FriendGames } from "./friend-games";
-import { ProfileReels, ZionReels } from "./zion-reels";
+const FriendGames = dynamic(()=>import("./friend-games").then(m=>m.FriendGames));
+const ProfileReels = dynamic(()=>import("./zion-reels").then(m=>m.ProfileReels));
+const ZionReels = dynamic(()=>import("./zion-reels").then(m=>m.ZionReels));
 
 type Friendship = {
   id: string;
@@ -403,6 +406,7 @@ export function SocialShell() {
       return;
     }
     setEncryptionState("checking");
+    const identityReady=withTimeout(hasLocalE2EEIdentity(nextUser.id),4_000).catch(()=>false);
     try {
       const { data, error: profileError } = await withTimeout(
         supabase
@@ -417,10 +421,7 @@ export function SocialShell() {
       if (profileError) throw profileError;
       setProfile((data as ZionProfile | null) ?? null);
       if (data?.username) rememberDeviceAccount(data.username);
-      const localIdentity = await withTimeout(
-        hasLocalE2EEIdentity(nextUser.id),
-        4_000,
-      ).catch(() => false);
+      const localIdentity = await identityReady;
       setEncryptionState(localIdentity ? "ready" : "locked");
     } catch (problem) {
       setError(
@@ -459,7 +460,7 @@ export function SocialShell() {
         setEncryptionState("idle");
       });
     const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, session) => void loadProfile(session?.user ?? null),
+      (event, session) => {if(event!=="INITIAL_SESSION" && event!=="TOKEN_REFRESHED")void loadProfile(session?.user ?? null);},
     );
     return () => listener.subscription.unsubscribe();
   }, [loadProfile]);
@@ -3236,6 +3237,8 @@ function FriendChat({
   const callTimeoutRef = useRef<number | null>(null);
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
   const mediaUrlsRef = useRef(new Map<string, string>());
+  const mediaPool = useMemo(()=>createTaskPool(3),[]);
+  const mediaEpoch = useRef(0);
   useEffect(() => {
     if (!supabase || !friendId) return;
     const refresh = async () => {
@@ -3274,7 +3277,7 @@ function FriendChat({
     const readyMessages = await Promise.all(
       rows.map(async (item): Promise<FriendMessage> => {
         const encrypted = isE2EEEnvelope(item.message);
-        const decrypted = await decryptText(
+        const decrypted = item.media_path ? null : await decryptText(
           item.message,
           user.id,
           friendId,
@@ -3297,17 +3300,20 @@ function FriendChat({
     // Text appears immediately. Attachments are resolved progressively in the
     // background, so a large history can never hold the chat screen hostage.
     setMessages(readyMessages);
+    const epoch=mediaEpoch.current;
     void Promise.all(
-      readyMessages.map(async (item) => {
+      readyMessages.map((item) => mediaPool(`${friendship.id}:${item.id}:${item.media_path}`, async () => {
+        if(epoch!==mediaEpoch.current)return;
         // View-once media is never prefetched with normal chat history.
-        if (!item.media_path || item.media_url || item.view_once) return;
+        if (!item.media_path || item.media_url || item.view_once || mediaUrlsRef.current.has(item.media_path)) return;
         const { data: signed } = await supabase!.storage
           .from("chat-media")
           .createSignedUrl(item.media_path, 3600);
-        if (!signed?.signedUrl) return;
+        if (!signed?.signedUrl || epoch!==mediaEpoch.current) return;
         let mediaUrl = signed.signedUrl;
         let mediaError: string | null = null;
         if (!item.encrypted) {
+          mediaUrlsRef.current.set(item.media_path,mediaUrl);
           setMessages((current) =>
             current.map((message) =>
               message.id === item.id
@@ -3333,11 +3339,13 @@ function FriendChat({
             friendId,
             `friend:${friendship.id}`,
           );
+          if(epoch!==mediaEpoch.current)return;
           mediaUrl = URL.createObjectURL(blob);
           mediaUrlsRef.current.set(item.media_path, mediaUrl);
         } catch {
           mediaError = "🔒 Unable to decrypt this attachment";
         }
+        if(epoch!==mediaEpoch.current)return;
         setMessages((current) =>
           current.map((message) =>
             message.id === item.id
@@ -3349,9 +3357,9 @@ function FriendChat({
               : message,
           ),
         );
-      }),
-    );
-  }, [friendId, friendship.id, user.id]);
+      })),
+    ).catch(()=>{});
+  }, [friendId, friendship.id, user.id, mediaPool]);
   const stopCall = useCallback(
     (notify = true) => {
       if (notify)
@@ -3484,7 +3492,16 @@ function FriendChat({
           table: "friend_messages",
           filter: `friendship_id=eq.${friendship.id}`,
         },
-        () => void load(),
+        (payload) => {
+          if(payload.eventType==="UPDATE") {
+            const row=payload.new as FriendMessage;
+            const old=payload.old as Partial<FriendMessage>;
+            if(old.message!==undefined && row.message===old.message && row.deleted_at===old.deleted_at && row.viewed_at===old.viewed_at && JSON.stringify(row.hidden_for)===JSON.stringify(old.hidden_for) && row.media_path===old.media_path){
+              setMessages(current=>current.map(m=>m.id===row.id?{...m,read_at:row.read_at}:m));return;
+            }
+          }
+          void load();
+        },
       )
       .on("presence", { event: "sync" }, () => {
         const presence = channel.presenceState();
@@ -3602,6 +3619,7 @@ function FriendChat({
       stopCall(false);
       void client.removeChannel(channel);
       liveRef.current = null;
+      mediaEpoch.current++;
       mediaUrls.forEach((url) => URL.revokeObjectURL(url));
       mediaUrls.clear();
     };
