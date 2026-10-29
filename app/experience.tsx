@@ -87,6 +87,8 @@ export function Experience({
   onOpenAccountManager?: () => void;
 }) {
   const [stage, setStage] = useState<Stage>("welcome");
+  const [chatFullscreen,setChatFullscreen]=useState(true);
+  useEffect(()=>{if(stage!=="chat"||!chatFullscreen)return;const viewport=window.visualViewport;const update=()=>{document.documentElement.style.setProperty('--zion-stranger-height',`${viewport?.height??window.innerHeight}px`);document.documentElement.style.setProperty('--zion-stranger-top',`${viewport?.offsetTop??0}px`)};update();viewport?.addEventListener('resize',update);viewport?.addEventListener('scroll',update);return()=>{viewport?.removeEventListener('resize',update);viewport?.removeEventListener('scroll',update)}},[stage,chatFullscreen]);
   const [showZionIntro, setShowZionIntro] = useState(false);
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [userId, setUserId] = useState("");
@@ -930,7 +932,7 @@ export function Experience({
             </div>
           ) : null}
           {stage === "chat" ? (
-            <div className="stage chat-stage">
+            <div className={`stage chat-stage ${chatFullscreen?"zion-stranger-full":""}`}><button className="chat-size-toggle" onClick={()=>setChatFullscreen(!chatFullscreen)}>{chatFullscreen?"Exit full screen":"Full screen"}</button>
               <div className="chat-head">
                 <div>
                   <span className="live-dot" /> End-to-end encrypted · Next

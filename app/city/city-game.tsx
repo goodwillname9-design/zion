@@ -9,9 +9,11 @@ import WorldPanel from './world-panel';
 import { initialSave, missions, parseSave, shop, type Save } from './game-data';
 import styles from './city.module.css';
 import { useCityOnline, type Position } from './use-city-online';
+import { buildPark } from './park';
+import { PARK } from './park-model';
 
 const SAVE_KEY = 'zion-harbour-v63';
-type Hud = { x: number; z: number; yaw: number; speed: number; vehicle: string; distance: number; nearShop: boolean; fps: number };
+type Hud = { x: number; z: number; yaw: number; speed: number; vehicle: string; distance: number; nearShop: boolean; fps: number; nearRide: boolean; riding: boolean };
 export default function CityGame() {
   const host = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement>(null);
@@ -27,7 +29,7 @@ export default function CityGame() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [quality, setQuality] = useState('balanced');
-  const [hud, setHud] = useState<Hud>({ x: 3, z: 3, yaw: 0, speed: 0, vehicle: '', distance: 0, nearShop: false, fps: 0 });
+  const [hud, setHud] = useState<Hud>({ x: 3, z: 3, yaw: 0, speed: 0, vehicle: '', distance: 0, nearShop: false, fps: 0, nearRide: false, riding: false });
   const [health,setHealth]=useState(100);
   const aim=useRef<{id:number;x:number}|null>(null);
   const [mapOpen, setMapOpen] = useState(false);
@@ -102,6 +104,8 @@ export default function CityGame() {
         const o = new T.Mesh(boxGeo, m); o.position.set(x,y,z); o.scale.set(w,h,d); o.castShadow = o.receiveShadow = true; parent.add(o); return o;
       };
       let seed = 635;
+      // Keep the amusement park and Ferris wheel areas free of trees, rocks and grass.
+      const inPark=(px:number,pz:number,m=0)=>(Math.abs(px-PARK.cx)<PARK.half+m&&Math.abs(pz-PARK.cz)<PARK.half+m)||(Math.abs(px-PARK.ferris.x)<15+m&&Math.abs(pz-PARK.ferris.z)<9+m);
       const rand = () => { seed = (1664525 * seed + 1013904223) >>> 0; return seed / 4294967296; };
       const groundCanvas=document.createElement('canvas');groundCanvas.width=groundCanvas.height=256;
       const gc=groundCanvas.getContext('2d')!;gc.fillStyle='#66734d';gc.fillRect(0,0,256,256);
@@ -125,13 +129,13 @@ export default function CityGame() {
       const pose=new T.Object3D();
       for(let i=0;i<220;i++){
         let tx=0,tz=0;
-        do{tx=rand()*226-113;tz=rand()*226-113;}while([-42,0,42,84].some(v=>Math.abs(tx-v)<7)||[-84,-42,0,42,84].some(v=>Math.abs(tz-v)<7));
+        do{tx=rand()*226-113;tz=rand()*226-113;}while([-42,0,42,84].some(v=>Math.abs(tx-v)<7)||[-84,-42,0,42,84].some(v=>Math.abs(tz-v)<7)||inPark(tx,tz,1));
         const height=5+rand()*5;pose.position.set(tx,height/2,tz);pose.scale.set(1,height,1);pose.updateMatrix();trunks.setMatrixAt(i,pose.matrix);
         for(let j=0;j<2;j++){pose.position.set(tx+(j?.9:0),height+j*1.1,tz);pose.scale.set(2.3-j*.5,2.8-j*.6,2.3-j*.5);pose.rotation.y=rand()*6;pose.updateMatrix();for(let cluster=0;cluster<3;cluster++){const a=cluster*Math.PI*2/3+j;pose.position.set(tx+Math.cos(a)*1.3,height+j*1.1,tz+Math.sin(a)*1.3);pose.scale.set(1.75,1.85,1.75);pose.updateMatrix();leaves.setMatrixAt(i*6+j*3+cluster,pose.matrix);leaves.setColorAt(i*6+j*3+cluster,new T.Color().setHSL(.25+(i%3)*.015,.3,.32+(cluster%2)*.08));}}
         obstacles.push({x:tx,z:tz,w:.3,d:.3});
       }
       trunks.castShadow=leaves.castShadow=true;trunks.computeBoundingSphere();leaves.computeBoundingSphere();scene.add(trunks,leaves);
-      for(let i=0;i<25;i++){const rx=rand()*200-100,rz=rand()*200-100;if(Math.abs(rx)<9||Math.abs(rz)<9)continue;
+      for(let i=0;i<25;i++){const rx=rand()*200-100,rz=rand()*200-100;if(Math.abs(rx)<9||Math.abs(rz)<9||inPark(rx,rz,2))continue;
         const rock=new T.Mesh(leafGeo,concrete);rock.position.set(rx,.7,rz);rock.scale.set(1.6,1.3,1.2);rock.rotation.y=rand()*6;scene.add(rock);walls.push(rock);obstacles.push({x:rx,z:rz,w:1.5,d:1.3});}
       for(const [cx,cz] of [[-22,22],[65,-22],[-65,-65]]){
         walls.push(box(scene,mat('#675442'),cx,1.7,cz,6,3.4,5));box(scene,dark,cx,3.5,cz,7,.3,6);box(scene,glass,cx,1.7,cz+2.52,2,1.2,.05);obstacles.push({x:cx,z:cz,w:3.1,d:2.6});
@@ -143,7 +147,7 @@ export default function CityGame() {
       const grassGeo=new T.BufferGeometry();grassGeo.setAttribute('position',new T.Float32BufferAttribute([-.1,0,0,.1,0,0,.04,.6,.02, 0,0,-.1,0,0,.1,.02,.55,.04],3));grassGeo.computeVertexNormals();geometries.add(grassGeo);
       const grassMat=mat('#608631');grassMat.side=T.DoubleSide;
       const grass=new T.InstancedMesh(grassGeo,grassMat,14000);let grassCount=0;
-      for(let i=0;i<18000&&grassCount<14000;i++){const gx=tr()*226-113,gz=tr()*226-113;if([-42,0,42,84].some(v=>Math.abs(gx-v)<4.2)||[-84,-42,0,42,84].some(v=>Math.abs(gz-v)<3.6)||obstacles.some(o=>Math.abs(gx-o.x)<o.w+1&&Math.abs(gz-o.z)<o.d+1))continue;pose.position.set(gx,.03,gz);pose.rotation.set(0,tr()*Math.PI,0);const scale=.45+tr()*.8;pose.scale.set(scale,scale,scale);pose.updateMatrix();grass.setMatrixAt(grassCount,pose.matrix);grass.setColorAt(grassCount,new T.Color().setHSL(.22+tr()*.07,.38,.23+tr()*.12));grassCount++;}
+      for(let i=0;i<18000&&grassCount<14000;i++){const gx=tr()*226-113,gz=tr()*226-113;if(inPark(gx,gz,1)||[-42,0,42,84].some(v=>Math.abs(gx-v)<4.2)||[-84,-42,0,42,84].some(v=>Math.abs(gz-v)<3.6)||obstacles.some(o=>Math.abs(gx-o.x)<o.w+1&&Math.abs(gz-o.z)<o.d+1))continue;pose.position.set(gx,.03,gz);pose.rotation.set(0,tr()*Math.PI,0);const scale=.45+tr()*.8;pose.scale.set(scale,scale,scale);pose.updateMatrix();grass.setMatrixAt(grassCount,pose.matrix);grass.setColorAt(grassCount,new T.Color().setHSL(.22+tr()*.07,.38,.23+tr()*.12));grassCount++;}
       grass.count=grassCount;grass.receiveShadow=true;grass.computeBoundingSphere();scene.add(grass);
       // Stone lodge details remain within the original building collision footprints.
       const stoneCanvas=document.createElement('canvas');stoneCanvas.width=stoneCanvas.height=256;const sc=stoneCanvas.getContext('2d')!;sc.fillStyle='#716b5b';sc.fillRect(0,0,256,256);
@@ -229,9 +233,11 @@ export default function CityGame() {
       const jailSign=remoteLabel('JAIL • 30 SECOND CUSTODY');jailSign.position.set(7,4,46);for(const bx of [4,10])for(let i=0;i<6;i++)box(scene,chrome,bx,1.3,44+i,.08,2.6,.08);
       const traceMat=new T.LineBasicMaterial({color:'#ffe4a0'});materials.add(traceMat);
       const trace=new T.Line(traceGeo,traceMat);trace.visible=false;scene.add(trace);
+      const park=buildPark({T,scene,mat,geometries,materials,label:remoteLabel,obstacles});
       function blocked(nx:number,nz:number,r=0.5) {return Math.abs(nx)>119||Math.abs(nz)>120||obstacles.some(o=>Math.abs(nx-o.x)<o.w+r&&Math.abs(nz-o.z)<o.d+r);}
       const clear=()=>keys.current.clear();
       let hp=100,lastDamage=-5;
+      let seated=false,rideStarted=false,rideY=0;
       
       action.current=(name)=>{
         if(['fire','reload','shop','start'].includes(name))return;
@@ -245,6 +251,17 @@ export default function CityGame() {
         }
         if(name.startsWith('look:')){yaw-=Number(name.slice(5))*.006;return;}
         if(name==='vehicle') {
+          if(seated){
+            if(park.status(Date.now()).phase==='dwell'){seated=false;rideStarted=false;x=park.exit.x;z=park.exit.z;speed=0;setNotice('You got off the coaster.');}
+            else setNotice('Stay seated until the train is back at the station!');
+            return;
+          }
+          if(active<0&&Math.hypot(x-park.station.x,z-park.station.z)<8){
+            const st=park.status(Date.now());
+            if(st.phase==='dwell'){seated=true;rideStarted=false;speed=0;setNotice(`Seated! Departing in ${Math.ceil(st.secondsLeft)}s — hold on.`);}
+            else setNotice(`A ride is running. Next boarding in ${Math.ceil(st.secondsLeft)}s.`);
+            return;
+          }
           if(active>=0) {
             const ex=x+Math.cos(yaw)*2.7,ez=z-Math.sin(yaw)*2.7;
             if(blocked(ex,ez)) {setNotice('Move into open space to get out.');return;}
@@ -322,8 +339,15 @@ export default function CityGame() {
         if(driving)yaw+=steering*dt*1.4*Math.min(1,Math.abs(speed)/3)*Math.sign(speed);
         const strafe=driving||hp<=0||jailed?0:steering*(k.has('shift')?6:3.4)*dt;
         const nx=x+Math.sin(yaw)*speed*dt-Math.cos(yaw)*strafe,nz=z+Math.cos(yaw)*speed*dt+Math.sin(yaw)*strafe;
-        if(!blocked(nx,nz,driving?1.6:.5)){x=nx;z=nz;}else speed=0;
-        player.group.position.set(x,driving?.3:0,z);player.group.rotation.y=yaw;player.group.visible=!driving||parked[active].bike;
+        if(seated){
+          const s=park.seat(Date.now());
+          if(s.phase==='ride')rideStarted=true;
+          else if(rideStarted){seated=false;rideStarted=false;x=park.exit.x;z=park.exit.z;yaw=Math.PI;speed=0;setNotice('Ride finished — hope you enjoyed it!');}
+          if(seated){x=s.x;z=s.z;yaw=s.yaw;rideY=s.y;speed=0;}
+        }
+        if(!seated)rideY=0;
+        if(seated){speed=0;}else if(!blocked(nx,nz,driving?1.6:.5)){x=nx;z=nz;}else speed=0;
+        player.group.position.set(x,seated?rideY+.35:driving?.3:0,z);player.group.rotation.y=yaw;player.group.visible=!driving||parked[active].bike;
         player.mixer.update(dt * (driving ? 0 : Math.min(2,Math.abs(speed)/1.2)));
         player.limbs.forEach((l,i)=>l.rotation.x=driving?0:Math.sin(elapsed*10+i%2*Math.PI)*Math.min(.45,Math.abs(speed)*.12));
         if(driving){const v=parked[active];v.group.position.set(x,0,z);v.group.rotation.y=yaw;v.wheels.forEach(w=>w.rotation.x+=speed*dt*2);}
@@ -350,10 +374,11 @@ export default function CityGame() {
         let distance=0;if(m){marker.position.set(m.x,2+Math.sin(elapsed)*.3,m.z);marker.rotation.y=elapsed;distance=Math.hypot(x-m.x,z-m.z);
           if(distance<4&&saveRef.current.hits>=(m.requiresHits??0)){persist({...saveRef.current,cash:saveRef.current.cash+m.reward,mission:saveRef.current.mission+1});setNotice(`Mission complete · +$${m.reward}`);}}
         trace.visible=elapsed<shotUntil;
-        desired.set(x-Math.sin(yaw)*(driving?10:7),driving?5.5:4,z-Math.cos(yaw)*(driving?10:7));
-        camera.position.lerp(desired,1-Math.exp(-dt*5));camera.lookAt(x,1.3,z);
+        park.update(Date.now());
+        desired.set(x-Math.sin(yaw)*(seated?9:driving?10:7),seated?rideY+3.4:driving?5.5:4,z-Math.cos(yaw)*(seated?9:driving?10:7));
+        camera.position.lerp(desired,1-Math.exp(-dt*5));camera.lookAt(x,1.3+rideY,z);
         sun.position.set(x-50,90,z+45);sun.target.position.set(x,0,z);
-        if(now-report>200){setHud({x,z,yaw,speed:Math.round(Math.abs(speed)*3.6),vehicle:driving?(parked[active].bike?'Motorcycle':'Sedan'):'',distance:Math.round(distance),nearShop:Math.hypot(x-shop.x,z-shop.z)<9,fps:Math.round(frames*1000/Math.max(1,now-reportTime))});report=now;}
+        if(now-report>200){setHud({x,z,yaw,speed:Math.round(Math.abs(speed)*3.6),vehicle:driving?(parked[active].bike?'Motorcycle':'Sedan'):'',distance:Math.round(distance),nearShop:Math.hypot(x-shop.x,z-shop.z)<9,nearRide:Math.hypot(x-park.station.x,z-park.station.z)<8,riding:seated,fps:Math.round(frames*1000/Math.max(1,now-reportTime))});report=now;}
         if(now-reportTime>2000){const fps=frames*1000/(now-reportTime);if(currentQuality!=='high'&&fps<27&&pixelRatio>.7){grass.count=Math.min(3500,grassCount);renderer.shadowMap.enabled=false;pixelRatio=Math.max(.7,pixelRatio-.1);renderer.setPixelRatio(pixelRatio);resize();}reportTime=now;frames=0;}
         renderer.render(scene,camera);
       };
@@ -375,7 +400,7 @@ export default function CityGame() {
       {online.room&&online.self.current?.hp===0&&<p className={styles.notice}>Downed · automatic respawn in 5 seconds</p>}
       
       <section className={styles.quest}><small>CONTRACT {Math.min(save.mission+1,missions.length)} / {missions.length}</small><h1>{mission?.name||'Shift complete'}</h1><p>{mission?.brief||'All deliveries completed. Explore and meet friends.'}</p>{mission&&<strong>{hud.distance} m <span>· ${mission.reward} reward</span></strong>}</section>
-      <aside className={styles.wallet}><b>${save.cash.toLocaleString()}</b><small>GAME MONEY</small>{online.self.current&&<span>{online.self.current.username} · {online.self.current.role||"Explorer"}</span>}<span>Health {health}/100</span><span>{hud.vehicle||'On foot'} · {hud.speed} km/h</span></aside>
+      <aside className={styles.wallet}><b>${save.cash.toLocaleString()}</b><small>GAME MONEY</small>{online.self.current&&<span>{online.self.current.username} · {online.self.current.role||"Explorer"}</span>}<span>Health {health}/100</span><span>{hud.riding?'Roller coaster':(hud.vehicle||'On foot')} · {hud.speed} km/h</span></aside>
       <button className={styles.mapButton} onClick={()=>setMapOpen(!mapOpen)} aria-label="Toggle trail map">{mapOpen?'Close map':'Trail map'}</button>
       <div className={`${styles.map} ${mapOpen?styles.expanded:''}`}>
         <svg viewBox="-125 -125 250 250" role="img" aria-label="Trail map: player arrow, gold mission, S range shop">
@@ -384,11 +409,13 @@ export default function CityGame() {
           <rect x="-125" y="-125" width="250" height="45" fill="#465d3d"/><text x="0" y="-108" fontSize="10" textAnchor="middle" fill="#302e28">NORTH RIDGE</text><text x="-35" y="60" fontSize="9" fill="#d7d1bc">KERALA SOCIAL WORLD</text><path d="M -125 121 H 125" stroke="#465d3d" strokeWidth="8"/>
           <circle cx={shop.x} cy={shop.z} r="8" fill="#91c9b3"/><text x={shop.x} y={shop.z+4} fontSize="11" textAnchor="middle" fill="#122322">S</text>
           {mission&&<circle cx={mission.x} cy={mission.z} r="5" fill="#efc489"/>}
+          <circle cx={PARK.cx} cy={PARK.cz} r="10" fill="#e8344d" opacity=".9"/><text x={PARK.cx} y={PARK.cz+3.5} fontSize="9" textAnchor="middle" fill="#fff">RIDE</text>
+          <circle cx={PARK.ferris.x} cy={PARK.ferris.z} r="9" fill="#35e0ff"/><text x={PARK.ferris.x} y={PARK.ferris.z+3.5} fontSize="8" textAnchor="middle" fill="#0b2530">WHEEL</text>
           <path d="M 0 7 L -4 -4 L 0 -2 L 4 -4 Z" fill="white" transform={`translate(${hud.x} ${hud.z}) rotate(${-hud.yaw*180/Math.PI})`}/>
         </svg><small>YOU △ · MISSION ● · SHOP S</small>
       </div>
       <p className={styles.notice} role="status">{notice||'Drag: look around · WASD/arrows: move · E: vehicle'}</p>
-      <div className={styles.controls}><Joystick onMove={(x,y)=>{for(const [key,pressed] of [['w',y<-.2],['s',y>.2],['a',x<-.2],['d',x>.2]] as const){if(pressed)keys.current.add(key);else keys.current.delete(key);}}}/><div className={styles.actions}><button onClick={()=>action.current('vehicle')}>{hud.vehicle?'Exit':'Enter vehicle'}</button>{hold(hud.vehicle?' ':'shift',hud.vehicle?'Brake':'Run')}</div></div>
+      <div className={styles.controls}><Joystick onMove={(x,y)=>{for(const [key,pressed] of [['w',y<-.2],['s',y>.2],['a',x<-.2],['d',x>.2]] as const){if(pressed)keys.current.add(key);else keys.current.delete(key);}}}/><div className={styles.actions}><button onClick={()=>action.current('vehicle')}>{hud.riding?'Get off':hud.nearRide?'Ride coaster':hud.vehicle?'Exit':'Enter vehicle'}</button>{hold(hud.vehicle?' ':'shift',hud.vehicle?'Brake':'Run')}</div></div>
       <footer className={styles.footer}><span>{online.status}</span><label>Graphics <select value={quality} onChange={e=>{qualityRef.current=e.target.value;setQuality(e.target.value);}}><option value="balanced">Balanced</option><option value="low">Performance</option><option value="high">High detail</option></select></label></footer>
       {!ready&&!error&&<div className={styles.overlay}>Loading Kerala social world…</div>}
       {paused&&!error&&<div className={styles.overlay}><h2>{health?"Take a breather.":"You were downed"}</h2><p>Your progress is saved on this browser.</p><button onClick={()=>health?pause(false):action.current("respawn")}>{health?"Continue":"Respawn"}</button><Link href="/">Back to ZION</Link></div>}

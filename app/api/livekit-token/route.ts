@@ -6,6 +6,9 @@ import { livekitConfig } from '@/lib/livekit-config';
 
 export const runtime = "nodejs";
 
+// A successful credential check is remembered for 5 minutes per server instance, so joins are not slowed by it.
+const preflightOk = new Map<string, number>();
+
 const clean = (value: unknown, max: number) =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
 
@@ -63,15 +66,18 @@ export async function POST(request: NextRequest) {
   if(!profile||profile.is_banned)return NextResponse.json({error:'An active ZION profile is required.'},{status:403});
   // Verify that the deployed URL and key pair are accepted by that LiveKit server.
   // This read-only preflight does not create a room or send the secret to the browser.
+  const preflightKey=`${apiUrl}|${apiKey}`;
+  const cachedAt=preflightOk.get(preflightKey);
   const serviceToken=new AccessToken(apiKey,apiSecret,{ttl:'1m'});
   serviceToken.addGrant({roomList:true});
-  try {
+  if(!cachedAt||Date.now()-cachedAt>300_000)try {
     const check=await fetch(`${apiUrl}/twirp/livekit.RoomService/ListRooms`,{
       method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${await serviceToken.toJwt()}`},
       body:JSON.stringify({names:[roomName]}),signal:AbortSignal.timeout(7000),cache:'no-store',redirect:'error',
     });
     if(check.status===401||check.status===403)return NextResponse.json({error:'LiveKit rejected the server credentials. The owner must replace the LiveKit key and secret using the same project as the URL, then redeploy. Changing the meeting password will not fix this.',code:'LIVEKIT_CREDENTIALS_REJECTED'},{status:503});
     if(!check.ok)return NextResponse.json({error:'Meeting server is unavailable. Please retry later.',code:'LIVEKIT_UNAVAILABLE'},{status:503});
+    preflightOk.set(preflightKey,Date.now());
   }catch{return NextResponse.json({error:'Could not reach the meeting server. Check the LiveKit URL and retry.',code:'LIVEKIT_UNREACHABLE'},{status:503});}
   const token = new AccessToken(apiKey, apiSecret, {
     identity: data.user.id,

@@ -26,6 +26,16 @@ const makeCode = () => {
     .toUpperCase();
 };
 
+
+// Keeps big rooms smooth: only the video people can actually see is downloaded (adaptiveStream),
+// publishers stop sending layers nobody watches (dynacast), and speech is cleaned on-device.
+const MEETING_OPTIONS = {
+  adaptiveStream: true,
+  dynacast: true,
+  audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  videoCaptureDefaults: { resolution: { width: 1280, height: 720, frameRate: 30 } },
+  publishDefaults: { simulcast: true, dtx: true, red: true },
+};
 export function MeetingRoom() {
   const [meetingId, setMeetingId] = useState("");
   const [passcode, setPasscode] = useState("");
@@ -127,6 +137,8 @@ export function MeetingRoom() {
           connect
           audio
           video
+          options={MEETING_OPTIONS}
+          connectOptions={{ autoSubscribe: true, maxRetries: 3 }}
           onDisconnected={() => setToken("")}
           onError={(problem) => { setError(connectionError(problem.message || "Meeting connection failed.")); setToken(""); }}
         >

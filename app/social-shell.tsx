@@ -44,7 +44,12 @@ import {
   VideoOff,
   X,
 } from "lucide-react";
-import type { RealtimeChannel, User } from "@supabase/supabase-js";
+import type {
+  AuthChangeEvent,
+  RealtimeChannel,
+  Session,
+  User,
+} from "@supabase/supabase-js";
 
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
@@ -126,6 +131,29 @@ type FriendMessage = {
   encrypted?: boolean;
 };
 const avatars = ["👨🏽", "👨🏻‍🦱", "👨🏿‍🦲", "🧔🏼", "👩🏽", "👩🏻‍🦱", "👩🏿", "👱🏼‍♀️", "🧑🏾", "🧑🏻‍🦰"];
+const FALLBACK_ICE: RTCIceServer[] = [
+  { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun.cloudflare.com:3478"] },
+];
+let iceCache: { at: number; servers: RTCIceServer[] } | null = null;
+// STUN-only calls fail on many mobile networks; the server adds a TURN relay when the owner configures one.
+async function loadIceServers(): Promise<RTCIceServer[]> {
+  if (iceCache && Date.now() - iceCache.at < 10 * 60_000) return iceCache.servers;
+  try {
+    const { data } = (await supabase?.auth.getSession()) ?? { data: { session: null } };
+    if (!data.session) return FALLBACK_ICE;
+    const response = await fetch("/api/ice-servers", {
+      headers: { authorization: `Bearer ${data.session.access_token}` },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) return FALLBACK_ICE;
+    const body = (await response.json()) as { iceServers?: RTCIceServer[] };
+    if (!Array.isArray(body.iceServers) || !body.iceServers.length) return FALLBACK_ICE;
+    iceCache = { at: Date.now(), servers: body.iceServers };
+    return iceCache.servers;
+  } catch {
+    return FALLBACK_ICE;
+  }
+}
 const ZION_CEO_ID = "fd62030e-f3b8-4c14-bce7-a1f3eedbb74b";
 const streakBadge = (count: number) =>
   count >= 360 ? "🖤💛❤️" : count >= 30 ? "❤️" : count >= 10 ? "💛" : "🖤";
@@ -367,7 +395,7 @@ function SocialConnections({ profileId, initialMode = "followers" }: { profileId
 export function SocialShell() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<ZionProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(supabase));
   const [friendsOpen, setFriendsOpen] = useState(false);
   const {gameId:autoGameId,clearGame}=useGameLaunch(user?.id);
   const [friendsInitialTab, setFriendsInitialTab] = useState<
@@ -378,6 +406,10 @@ export function SocialShell() {
   const [feedOpen,setFeedOpen] = useState(false);
   const [reelsOpen, setReelsOpen] = useState(false);
   const [error, setError] = useState("");
+  const [profileLoadError, setProfileLoadError] = useState("");
+  const [authRestoreError, setAuthRestoreError] = useState("");
+  const profileLoadId = useRef(0);
+  const authEventVersion = useRef(0);
   const [notificationPrompt, setNotificationPrompt] = useState(false);
   const [notificationToast, setNotificationToast] = useState("");
   const [notificationCount, setNotificationCount] = useState(0);
@@ -398,13 +430,17 @@ export function SocialShell() {
       localStorage.getItem("zion-theme") === "day" ? "day" : "dark";
   }, []);
   const loadProfile = useCallback(async (nextUser: User | null) => {
+    const requestId = ++profileLoadId.current;
     setUser(nextUser);
+    setProfileLoadError("");
+    setAuthRestoreError("");
     if (!nextUser || !supabase) {
       setProfile(null);
       setLoading(false);
       setEncryptionState("idle");
       return;
     }
+    setLoading(true);
     setEncryptionState("checking");
     const identityReady=withTimeout(hasLocalE2EEIdentity(nextUser.id),4_000).catch(()=>false);
     try {
@@ -419,23 +455,59 @@ export function SocialShell() {
         10_000,
       );
       if (profileError) throw profileError;
+      if (requestId !== profileLoadId.current) return;
       setProfile((data as ZionProfile | null) ?? null);
       if (data?.username) rememberDeviceAccount(data.username);
       const localIdentity = await identityReady;
+      if (requestId !== profileLoadId.current) return;
       setEncryptionState(localIdentity ? "ready" : "locked");
     } catch (problem) {
-      setError(
+      if (requestId !== profileLoadId.current) return;
+      setProfile(null);
+      setProfileLoadError(
         problem instanceof Error
           ? problem.message
           : "ZION could not connect. Please try again.",
       );
-      setUser(null);
-      setProfile(null);
       setEncryptionState("idle");
     } finally {
-      setLoading(false);
+      if (requestId === profileLoadId.current) setLoading(false);
     }
   }, []);
+
+  const restoreSession = useCallback(async () => {
+    if (!supabase) return;
+    const eventVersion = authEventVersion.current;
+    setLoading(true);
+    setAuthRestoreError("");
+    try {
+      const { data, error: sessionError } = await withTimeout(
+        supabase.auth.getSession(),
+        8_000,
+      );
+      if (sessionError) throw sessionError;
+      if (eventVersion === authEventVersion.current)
+        await loadProfile(data.session?.user ?? null);
+    } catch (problem) {
+      if (eventVersion !== authEventVersion.current) return;
+      setAuthRestoreError(
+        problem instanceof Error
+          ? problem.message
+          : "ZION could not restore your session. Please try again.",
+      );
+      setLoading(false);
+      setEncryptionState("idle");
+    }
+  }, [loadProfile]);
+
+  const handleAuthStateChange = useCallback(
+    (event: AuthChangeEvent, session: Session | null) => {
+      if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") return;
+      authEventVersion.current += 1;
+      void loadProfile(session?.user ?? null);
+    },
+    [loadProfile],
+  );
 
   useEffect(() => {
     const ready = () => setEncryptionState("ready");
@@ -444,26 +516,15 @@ export function SocialShell() {
   }, []);
 
   useEffect(() => {
-    if (!supabase) {
-      setLoading(false);
-      return;
-    }
-    void withTimeout(supabase.auth.getSession(), 8_000)
-      .then(({ data }) => loadProfile(data.session?.user ?? null))
-      .catch((problem) => {
-        setError(
-          problem instanceof Error
-            ? problem.message
-            : "ZION could not connect. Please refresh and try again.",
-        );
-        setLoading(false);
-        setEncryptionState("idle");
-      });
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (event, session) => {if(event!=="INITIAL_SESSION" && event!=="TOKEN_REFRESHED")void loadProfile(session?.user ?? null);},
-    );
-    return () => listener.subscription.unsubscribe();
-  }, [loadProfile]);
+    if (!supabase) return;
+    const { data: listener } =
+      supabase.auth.onAuthStateChange(handleAuthStateChange);
+    const restoreTimer = window.setTimeout(() => void restoreSession(), 0);
+    return () => {
+      window.clearTimeout(restoreTimer);
+      listener.subscription.unsubscribe();
+    };
+  }, [handleAuthStateChange, restoreSession]);
 
   useEffect(() => {
     if (!user || !profile || !("Notification" in window)) return;
@@ -706,12 +767,34 @@ export function SocialShell() {
     setNotificationPrompt(false);
   };
 
-  if (openingIntro)
-    return <OpeningIntro onEnter={() => setOpeningIntro(false)} />;
   if (loading || encryptionState === "checking")
     return <AuthScreen title="Opening ZION…" />;
   if (!supabase)
     return <AuthScreen title="ZION needs Supabase configuration." />;
+  if (authRestoreError)
+    return (
+      <main className="auth-shell">
+        <section className="auth-card">
+          <div className="auth-logo">♥</div>
+          <h1>Could not restore your session.</h1>
+          <p className="error-note">{authRestoreError}</p>
+          <Button onClick={() => void restoreSession()}>Try again</Button>
+        </section>
+      </main>
+    );
+  if (profileLoadError && user)
+    return (
+      <main className="auth-shell">
+        <section className="auth-card">
+          <div className="auth-logo">♥</div>
+          <h1>Your session is still active.</h1>
+          <p className="error-note">{profileLoadError}</p>
+          <Button onClick={() => void loadProfile(user)}>Retry profile loading</Button>
+        </section>
+      </main>
+    );
+  if (openingIntro && !user)
+    return <OpeningIntro onEnter={() => setOpeningIntro(false)} />;
   if (!user) return <LoginScreen setError={setError} error={error} />;
   if (!profile) return <ProfileSetup user={user} onSaved={setProfile} />;
   if (profile.is_banned) return <BanScreen reason={profile.ban_reason} />;
@@ -720,6 +803,8 @@ export function SocialShell() {
       <EncryptionUnlock
         user={user}
         username={profile.username}
+        error={error}
+        setError={setError}
         onUnlocked={() => setEncryptionState("ready")}
       />
     );
@@ -920,60 +1005,73 @@ function LoginScreen({
     }
     setAccountBusy(true);
     setError("");
-    const authEmail = await usernameAuthEmail(username);
-    if (accountMode === "signup") {
-      const { data, error: signupError } = await supabase.auth.signUp({
-        email: authEmail,
-        password,
-        options: { data: { zion_username: username.trim() } },
-      });
-      if (signupError)
-        setError(
-          signupError.message.toLowerCase().includes("registered")
-            ? "That username is already registered. Choose another username or log in."
-            : signupError.message,
-        );
-      else if (!data.session)
-        setError(
-          "Disable Confirm email in Supabase Authentication settings, then try again.",
-        );
-      else {
-        try {
-          await ensureE2EEIdentity(data.user!.id, password);
-          rememberDeviceAccount(username.trim());
-          window.dispatchEvent(new Event("zion-e2ee-ready"));
-        } catch (problem) {
-          await supabase.auth.signOut();
-          setError(
-            problem instanceof Error
-              ? problem.message
-              : "Encryption setup failed.",
-          );
-        }
-      }
-    } else {
-      const { data, error: loginError } =
-        await supabase.auth.signInWithPassword({
+    try {
+      const authEmail = await usernameAuthEmail(username);
+      if (accountMode === "signup") {
+        const { data, error: signupError } = await supabase.auth.signUp({
           email: authEmail,
           password,
+          options: { data: { zion_username: username.trim() } },
         });
-      if (loginError) setError("Incorrect username or password.");
-      else {
-        try {
-          await ensureE2EEIdentity(data.user.id, password);
-          rememberDeviceAccount(username.trim());
-          window.dispatchEvent(new Event("zion-e2ee-ready"));
-        } catch (problem) {
-          await supabase.auth.signOut();
+        if (signupError)
           setError(
-            problem instanceof Error
-              ? problem.message
-              : "Encryption setup failed.",
+            signupError.message.toLowerCase().includes("registered")
+              ? "That username is already registered. Choose another username or log in."
+              : signupError.message,
           );
+        else if (!data.session)
+          setError(
+            "Disable Confirm email in Supabase Authentication settings, then try again.",
+          );
+        else {
+          try {
+            await ensureE2EEIdentity(data.user!.id, password);
+            rememberDeviceAccount(username.trim());
+            window.dispatchEvent(new Event("zion-e2ee-ready"));
+          } catch (problem) {
+            setError(
+              problem instanceof Error
+                ? problem.message
+                : "Encryption setup failed.",
+            );
+          }
+        }
+      } else {
+        const { data, error: loginError } =
+          await supabase.auth.signInWithPassword({
+            email: authEmail,
+            password,
+          });
+        if (loginError)
+          setError(
+            loginError.name === "AuthRetryableFetchError" ||
+              (loginError.status ?? 0) >= 500
+              ? "ZION could not reach the authentication service. Check your connection and try again."
+              : loginError.status === 429
+                ? "Too many attempts. Wait a moment, then try again."
+                : "Incorrect username or password.",
+          );
+        else {
+          try {
+            await ensureE2EEIdentity(data.user.id, password);
+            rememberDeviceAccount(username.trim());
+            window.dispatchEvent(new Event("zion-e2ee-ready"));
+          } catch (problem) {
+            setError(
+              problem instanceof Error
+                ? problem.message
+                : "Encryption setup failed.",
+            );
+          }
         }
       }
+    } catch (problem) {
+      setError(
+        problem instanceof Error ? problem.message : "Authentication failed.",
+      );
+    } finally {
+      setAccountBusy(false);
     }
-    setAccountBusy(false);
   };
   return (
     <main className="auth-shell">
@@ -1054,14 +1152,17 @@ function EncryptionUnlock({
   user,
   username,
   onUnlocked,
+  error,
+  setError,
 }: {
   user: User;
   username: string;
   onUnlocked: () => void;
+  error: string;
+  setError: (value: string) => void;
 }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   const unlock = async () => {
     if (password.length < 6) return;
     setBusy(true);
@@ -3205,6 +3306,13 @@ function FriendChat({
   const [replyTo, setReplyTo] = useState<FriendMessage | null>(null);
   const [showFriendProfile, setShowFriendProfile] = useState(false);
   const [callMinimized,setCallMinimized]=useState(false);
+  const [rearCamera,setRearCamera]=useState(false);
+  const [switchingCamera,setSwitchingCamera]=useState(false);
+  const cameraSwitchBusy=useRef(false);
+  const callRoomRef=useRef<HTMLDivElement>(null);
+  useEffect(()=>{const viewport=window.visualViewport;const update=()=>{document.documentElement.style.setProperty('--zion-chat-height',`${viewport?.height??window.innerHeight}px`);document.documentElement.style.setProperty('--zion-chat-top',`${viewport?.offsetTop??0}px`)};update();viewport?.addEventListener('resize',update);viewport?.addEventListener('scroll',update);return()=>{viewport?.removeEventListener('resize',update);viewport?.removeEventListener('scroll',update);document.documentElement.style.removeProperty('--zion-chat-height');document.documentElement.style.removeProperty('--zion-chat-top')}},[]);
+  const enterCallFullscreen=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await callRoomRef.current?.requestFullscreen()}catch{setCallError('This browser uses the full-window call view. Rotate your phone for a wider picture.')}};
+
   const [callState, setCallState] = useState<
     "idle" | "requesting" | "incoming" | "connecting" | "active"
   >("idle");
@@ -3381,6 +3489,8 @@ function FriendChat({
       if (callTimeoutRef.current) window.clearTimeout(callTimeoutRef.current);
       setMuted(false);
       setCameraOn(true);
+      setRearCamera(false);
+      if(document.fullscreenElement===callRoomRef.current)void document.exitFullscreen().catch(()=>{});
       setSpeakerOn(true);
       setCallState("idle");
     },
@@ -3390,13 +3500,14 @@ function FriendChat({
     async (kind = callKindRef.current) => {
       if (peerRef.current) return peerRef.current;
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl:true, channelCount:{ideal:1}, sampleRate:{ideal:48000} },
         video:
           kind === "video"
             ? {
                 facingMode: "user",
                 width: { ideal: 1280 },
                 height: { ideal: 720 },
+                frameRate: {ideal:30,max:30},
               }
             : false,
       });
@@ -3406,10 +3517,9 @@ function FriendChat({
         void localVideoRef.current.play().catch(() => undefined);
       }
       const peer = new RTCPeerConnection({
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:stun1.l.google.com:19302" },
-        ],
+        iceServers: await loadIceServers(),
+        iceCandidatePoolSize: 4,
+        bundlePolicy: "max-bundle",
       });
       stream.getTracks().forEach((track) => peer.addTrack(track, stream));
       peer.onicecandidate = (event) => {
@@ -3430,9 +3540,21 @@ function FriendChat({
         }
         setCallState("active");
       };
+      let dropTimer: number | undefined;
       peer.onconnectionstatechange = () => {
-        if (["failed", "disconnected", "closed"].includes(peer.connectionState))
+        const state = peer.connectionState;
+        if (state === "connected") {
+          window.clearTimeout(dropTimer);
+        } else if (state === "disconnected") {
+          // Brief network blips recover on their own; only end the call if it stays down.
+          window.clearTimeout(dropTimer);
+          dropTimer = window.setTimeout(() => {
+            if (peer.connectionState === "disconnected") stopCall(false);
+          }, 10_000);
+        } else if (state === "failed" || state === "closed") {
+          window.clearTimeout(dropTimer);
           stopCall(false);
+        }
       };
       peerRef.current = peer;
       return peer;
@@ -3951,6 +4073,28 @@ function FriendChat({
     });
     setMuted(next);
   };
+  const switchCallCamera=async()=>{
+    const peer=peerRef.current,stream=streamRef.current;
+    if(cameraSwitchBusy.current||!peer||!stream)return;
+    const old=stream.getVideoTracks()[0],sender=peer.getSenders().find(s=>s.track?.kind==='video');
+    if(!old||!sender)return;
+    cameraSwitchBusy.current=true;setSwitchingCamera(true);setCallError('');
+    const desired=rearCamera?'user':'environment';let replacement:MediaStream|null=null;let released=false;
+    const capture=(facing:string)=>navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{exact:facing},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30,max:30}}});
+    try{
+      try{replacement=await capture(desired)}catch(error){if(error instanceof DOMException&&error.name==='NotReadableError'){old.stop();released=true;replacement=await capture(desired)}else throw error}
+      if(peerRef.current!==peer||streamRef.current!==stream){replacement.getTracks().forEach(t=>t.stop());return}
+      const track=replacement.getVideoTracks()[0];track.enabled=old.enabled;await sender.replaceTrack(track);
+      if(peerRef.current!==peer||streamRef.current!==stream){track.stop();return}
+      stream.removeTrack(old);stream.addTrack(track);old.stop();
+      if(localVideoRef.current){localVideoRef.current.srcObject=new MediaStream(stream.getTracks());void localVideoRef.current.play().catch(()=>{})}
+      setRearCamera(desired==='environment');
+    }catch{
+      replacement?.getTracks().forEach(t=>t.stop());
+      if(peerRef.current===peer&&released){try{const restore=await capture(rearCamera?'environment':'user');if(peerRef.current!==peer){restore.getTracks().forEach(t=>t.stop());return}const track=restore.getVideoTracks()[0];track.enabled=old.enabled;await sender.replaceTrack(track);stream.removeTrack(old);stream.addTrack(track);if(localVideoRef.current)localVideoRef.current.srcObject=new MediaStream(stream.getTracks())}catch{setCameraOn(false)}}
+      if(peerRef.current===peer)setCallError('Could not switch camera. Check camera permission or try another camera on this device.');
+    }finally{cameraSwitchBusy.current=false;setSwitchingCamera(false)}
+  };
   const toggleSpeaker = () => {
     const next = !speakerOn;
     if (remoteAudioRef.current) remoteAudioRef.current.muted = !next;
@@ -4000,7 +4144,7 @@ function FriendChat({
     );
   return (
     <div className="social-overlay">
-      <section className="friend-chat">
+      <section className="friend-chat zion-chat-expanded">
         <audio ref={remoteAudioRef} autoPlay />
         <header>
           <button onClick={back}>
@@ -4058,8 +4202,8 @@ function FriendChat({
             </div>
           )}
         </header>
-        <div className={callState!=="idle"&&!callMinimized?"zion-call-room":"zion-call-inline"}>
-          {callState!=="idle"&&<><button className="call-minimize" onClick={()=>setCallMinimized(!callMinimized)}>{callMinimized?"Expand call":"Back to chat"}</button><div className="call-identity"><h2>{friend?.username??"ZION friend"}</h2><p>{callState==="active"?"Connected":callState==="incoming"?"Incoming call":"Calling…"}</p>{callKind!=="video"&&<div className="call-portrait"><ProfileAvatar profile={friend}/></div>}</div></>}
+        <div ref={callRoomRef} className={callState!=="idle"&&!callMinimized?"zion-call-room":"zion-call-inline"}>
+          {callState!=="idle"&&<><button className="call-minimize" onClick={()=>{if(document.fullscreenElement===callRoomRef.current)void document.exitFullscreen().catch(()=>{});setCallMinimized(!callMinimized)}}>{callMinimized?"Expand call":"Back to chat"}</button><div className="call-identity"><h2>{friend?.username??"ZION friend"}</h2><p>{callState==="active"?"Connected":callState==="incoming"?"Incoming call":"Calling…"}</p>{callKind!=="video"&&<div className="call-portrait"><ProfileAvatar profile={friend}/></div>}</div></>}
         {callKind === "video" && callState !== "idle" ? (
           <div className="private-video-stage">
             <video ref={remoteVideoRef} autoPlay playsInline />
@@ -4070,7 +4214,7 @@ function FriendChat({
               </div>
             ) : null}
             <video
-              className="local-video"
+              className={`local-video ${rearCamera?"rear-camera":"front-camera"}`}
               ref={localVideoRef}
               autoPlay
               playsInline
@@ -4132,6 +4276,8 @@ function FriendChat({
                 <span>{cameraOn ? "Camera" : "Camera off"}</span>
               </button>
             ) : null}
+            {callKind === "video" && <button disabled={switchingCamera} onClick={()=>void switchCallCamera()} aria-label="Switch front or back camera"><Camera/><span>{switchingCamera?'Switching…':rearCamera?'Front camera':'Back camera'}</span></button>}
+            <button onClick={()=>void enterCallFullscreen()} aria-label="Toggle call fullscreen"><span>⛶</span><span>Fullscreen</span></button>
             <button className="end-control" onClick={() => stopCall()}>
               <PhoneOff />
               <span>End</span>

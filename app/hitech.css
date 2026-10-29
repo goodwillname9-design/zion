@@ -1,0 +1,45 @@
+/* ZION V81 — additive "hi-tech" polish + smoothness layer. Loaded after globals.css; remove this file to undo. */
+:root { --zion-neon: #35e0ff; --zion-neon-2: #9b5cff; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; text-rendering: optimizeLegibility; }
+button, [role="button"], a, summary, label, select { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+
+/* Crisp neon focus rings (keyboard + screen-reader friendly) */
+button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visible,
+input:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--zion-neon);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(53, 224, 255, .22);
+}
+input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):focus,
+textarea:focus { border-color: var(--zion-neon); box-shadow: 0 0 0 3px rgba(53, 224, 255, .18); }
+
+/* Typed text and long words never push the layout sideways */
+input, textarea { max-width: 100%; }
+p, li, h1, h2, h3, .friend-bubble, .answer-bubble { overflow-wrap: anywhere; }
+
+/* Slim gradient scrollbars */
+* { scrollbar-width: thin; scrollbar-color: rgba(53, 224, 255, .55) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: linear-gradient(rgba(53, 224, 255, .55), rgba(155, 92, 255, .55)); border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* CEO-only online badge */
+.zion-online-count {
+  border-color: rgba(53, 224, 255, .45);
+  background: linear-gradient(135deg, rgba(11, 29, 44, .95), rgba(26, 18, 54, .95));
+  color: #baf3ff;
+  box-shadow: 0 0 18px rgba(53, 224, 255, .25);
+}
+.zion-online-count i { background: var(--zion-neon); box-shadow: 0 0 8px var(--zion-neon); }
+
+/* ---- Smoothness: respect reduced-motion and switch off the heaviest effects on weaker devices ---- */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+html.zion-lite *, html.zion-lite *::before, html.zion-lite *::after {
+  animation-iteration-count: 1 !important;       /* stops endless background loops, keeps one-shot entrances */
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html.zion-lite { scroll-behavior: auto; }

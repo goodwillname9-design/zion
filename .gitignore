@@ -5,3 +5,6 @@ node_modules/
 !.env.example
 .vercel/
 npm-debug.log*
+
+vercel recovery codes/
+tsconfig.tsbuildinfo

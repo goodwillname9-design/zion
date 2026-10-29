@@ -3,9 +3,12 @@ import LightCord from "./light-cord";
 import type { Metadata } from "next";
 import "@fontsource-variable/montserrat";
 import "./globals.css";
+import "./hitech.css";
 import "@livekit/components-styles";
 import { PwaInstall } from "./pwa-install";
 import { LanguageSwitcher } from "./language-switcher";
+import { InputDirection } from "./input-direction";
+import { PerfMode } from "./perf-mode";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://zion-one-nu.vercel.app"),
@@ -38,6 +41,8 @@ export default function RootLayout({
         <LightCord />
         <OnlineCount />
         <LanguageSwitcher />
+        <InputDirection />
+        <PerfMode />
         <PwaInstall />
       </body>
     </html>
